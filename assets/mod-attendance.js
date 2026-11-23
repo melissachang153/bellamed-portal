@@ -87,8 +87,7 @@
     var t = await api('attPunch', { kind: kind });
     if (t.needConfirm) {
       var lbl = t.kindLabel;
-      var ok = await BM.ask('要覆蓋今天的' + lbl + '卡嗎？\n今天已在 ' + t.prev + (t.prevFix ? '（補登）' : '') + ' 打過' + lbl + '卡。\n確定的話會改成現在的時間 ' + t.now +
-        '，舊的時間會作廢，並重新計算' + (kind === 'in' ? '是否遲到。' : '早退和加班。'), { ok: '確定覆蓋' });
+      var ok = await BM.ask('要覆蓋今天的' + lbl + '卡嗎？\n今天已在 ' + t.prev + ' 打過' + lbl + '卡', { ok: '確定覆蓋' });
       if (!ok) return;
       t = await api('attPunch', { kind: kind, overwrite: true });
     }
