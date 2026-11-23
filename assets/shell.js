@@ -187,7 +187,9 @@
             return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item">' + icon(it.key) + '<span>' + esc(it.name) + '</span>' +
               (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
           }).join('') + '</div></div>';
-      }).join('');
+      }).join('') +
+      '<div class="side-foot"><button type="button" class="side-btn" id="sideClose" title="收合選單" aria-label="收合選單">' + $('#sideBtn').innerHTML + '</button></div>';
+    $('#sideClose').onclick = function () { setSide(false); };
     $$('#sideNav .nav-group').forEach(function (b) {
       b.onclick = function () {
         var sec = b.parentNode, name = b.firstChild.textContent, f = BM.store('navFold') || {};

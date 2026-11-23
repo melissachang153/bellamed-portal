@@ -402,3 +402,13 @@ body.test-mode .app-head { top: 0; }
 .hc-title { display: flex; align-items: center; gap: 8px; }
 .hc-title .nic { color: var(--brand); }
 .side .nav-sec:first-child { margin-top: 0; }
+
+/* 收合按鈕：選單右下角；選單收起時才出現在頁首 */
+.side { display: flex; flex-direction: column; padding-bottom: 8px; }
+.side-foot { margin-top: auto; padding-top: 12px; display: flex; justify-content: flex-end; position: sticky; bottom: 0; background: #fff; }
+@media (min-width: 960px) {
+  #sideBtn { display: none; }
+  body.side-closed #sideBtn { display: inline-flex; }
+}
+@media (max-width: 959px) { .side-foot { display: none; } }
+@media (min-width: 960px) { body:not(.side-closed) .app-head { padding-left: 16px; } }
