@@ -112,12 +112,12 @@
     if (act === 'publish') { await reload(await call('setEventStatus', { id: id, status: 'published' })); BM.toast('已公開，員工可以報名了'); }
     if (act === 'draft') { await reload(await call('setEventStatus', { id: id, status: 'draft' })); BM.toast('已改回草稿'); }
     if (act === 'cancel') {
-      if (!confirm('確定取消「' + e.name + '」？\n取消後此活動的報名不會計入次數，下次推播會標示〔已取消〕。')) return;
+      if (!await BM.ask('確定取消「' + e.name + '」？\n取消後此活動的報名不會計入次數，下次推播會標示〔已取消〕。')) return;
       await reload(await call('setEventStatus', { id: id, status: 'cancelled' }));
       BM.toast('已取消活動');
     }
     if (act === 'delete') {
-      if (!confirm('確定刪除「' + e.name + '」？\n\n刪除後活動會整個消失' + (e.regCount ? '，' + e.regCount + ' 人的報名紀錄也會一起刪除' : '') +
+      if (!await BM.ask('確定刪除「' + e.name + '」？\n\n刪除後活動會整個消失' + (e.regCount ? '，' + e.regCount + ' 人的報名紀錄也會一起刪除' : '') +
         '，無法復原，也不會通知群組。\n（如果要讓大家知道活動取消，請改用「取消活動」）')) return;
       await reload(await call('deleteEvent', { id: id }));
       BM.toast('已刪除');
@@ -215,7 +215,7 @@
       $('#upAtt', root).onchange = function () { upload(this.files[0], 'attachment'); };
       $$('[data-rm]', root).forEach(function (b) {
         b.onclick = async function () {
-          if (!confirm('確定移除？')) return;
+          if (!await BM.ask('確定移除？')) return;
           var kind = b.dataset.rm === 'poster' ? 'poster' : 'attachment';
           D = await call('removeFile', { eventId: e.id, kind: kind, fileId: b.dataset.rm });
           refreshFromD();
@@ -272,7 +272,7 @@
         meetPlace: $('#eMeetPlace', root).value, meetTimes: mt, notes: $('#eNotes', root).value
       };
       if (!payload.name) return BM.toast('請至少填寫活動名稱', true);
-      if (mode === 'draft' && e.status === 'published' && !confirm('改成草稿後，員工就看不到這個活動，也不能報名。確定？')) return;
+      if (mode === 'draft' && e.status === 'published' && !await BM.ask('改成草稿後，員工就看不到這個活動，也不能報名。確定？')) return;
       if (mode === 'push' && !dates.length) return BM.toast('推播前請先設定日期', true);
       var status = mode === 'push' ? 'published' : mode === 'keep' ? undefined : mode;
       var data = await call('saveEvent', { event: payload, status: status });
@@ -373,7 +373,7 @@
       var miss = p.items.filter(function (e) { return stars.indexOf(e.id) >= 0 && e.missing.length; });
       var msg = '確定推播到「' + targetName + '」？';
       if (miss.length) msg = '有 ' + miss.length + ' 個活動還有欄位未填寫。\n' + msg;
-      if (!confirm(msg)) return;
+      if (!await BM.ask(msg)) return;
       var r = await call('pushUpdate', { starIds: stars });
       BM.toast('已推播到' + r.sentTo);
       m.close();
@@ -402,7 +402,7 @@
       '<div class="section-title">最近的申請</div>' + (done.length ? done.map(function (c) { return item(c, false); }).join('') : '<div class="card empty">無</div>');
     $$('[data-rev]', box).forEach(function (b) {
       b.onclick = async function () {
-        if (!confirm('撤銷這筆申請？報名紀錄會改回申請前的樣子。')) return;
+        if (!await BM.ask('撤銷這筆申請？報名紀錄會改回申請前的樣子。')) return;
         await reload(await call('revokeCorrection', { id: b.dataset.rev }));
         BM.toast('已撤銷');
       };
@@ -555,7 +555,7 @@
     };
     if (!isNew && !s.admin) {
       $('#sReset', r).onclick = async function () {
-        if (!confirm('把 ' + (s.enName || s.name) + ' 的密碼恢復為預設密碼 ' + s.birthday + '？\n對方下次登入需重新設定新密碼。')) return;
+        if (!await BM.ask('把 ' + (s.enName || s.name) + ' 的密碼恢復為預設密碼 ' + s.birthday + '？\n對方下次登入需重新設定新密碼。')) return;
         await call('setStaffPassword', { id: s.id, reset: true });
         BM.toast('已恢復並解鎖，對方需重新登入');
         reload();
@@ -653,7 +653,7 @@
       b.onclick = async function () {
         var pt = b.dataset.pt;
         if (pt === target) return;
-        if (pt === 'main' && !confirm('切換到「正式群組」後，所有推播都會發到正式群組。確定？')) return;
+        if (pt === 'main' && !await BM.ask('切換到「正式群組」後，所有推播都會發到正式群組。確定？')) return;
         await reload(await call('saveSettings', { settings: { pushTarget: pt } }));
         BM.toast('推播目標：' + (pt === 'main' ? '正式群組' : '測試群組'));
       };
@@ -677,7 +677,7 @@
       b.onclick = async function () {
         var yy = b.dataset.year;
         var locked = st.lockedYears.indexOf(yy) >= 0;
-        if (!confirm(locked ? '解鎖 ' + yy + ' 年後，該年資料可以再被修改。改完記得重新鎖定。確定解鎖？' : '鎖定 ' + yy + ' 年？鎖定後該年的報名與修正都不能再改。')) return;
+        if (!await BM.ask(locked ? '解鎖 ' + yy + ' 年後，該年資料可以再被修改。改完記得重新鎖定。確定解鎖？' : '鎖定 ' + yy + ' 年？鎖定後該年的報名與修正都不能再改。')) return;
         await reload(await call('setYearLock', { year: yy, locked: !locked }));
         BM.toast(locked ? '已解鎖 ' + yy : '已鎖定 ' + yy);
       };
@@ -685,7 +685,7 @@
     // 立即備份
     $$('#bkChips [data-year]', box).forEach(function (b) {
       b.onclick = async function () {
-        if (!confirm('把 ' + b.dataset.year + ' 年的紀錄備份到年度紀錄試算表？（已有同年份分頁會覆蓋）')) return;
+        if (!await BM.ask('把 ' + b.dataset.year + ' 年的紀錄備份到年度紀錄試算表？（已有同年份分頁會覆蓋）')) return;
         var r = await call('runJobNow', { job: 'backup', year: b.dataset.year });
         BM.toast('已備份到「' + r.sheet + '」分頁');
       };
@@ -704,7 +704,7 @@
         '<div class="notice' + (p.target === 'main' ? '' : ' ok') + '">將推播到：<b>' + tname + '</b></div>' +
         '<div class="btn-row"><button class="btn block" id="yeSend">現在手動推播</button></div>');
       $('#yeSend', m.el).onclick = async function () {
-        if (!confirm('確定現在推播到「' + tname + '」？')) return;
+        if (!await BM.ask('確定現在推播到「' + tname + '」？')) return;
         var r = await call('runJobNow', { job: 'yearend' });
         BM.toast('已推播到' + r.sentTo);
         m.close();

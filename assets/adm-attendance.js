@@ -64,7 +64,7 @@
     };
     $$('[data-rm]', box).forEach(function (b) {
       b.onclick = async function () {
-        if (!confirm('取消這筆調整？')) return;
+        if (!await BM.ask('取消這筆調整？')) return;
         S.data = await call('attCalRemove', { year: S.year, id: b.dataset.rm });
         render();
       };

@@ -250,7 +250,7 @@
       (isAdmin() && !TEST ? '<a class="menu-row" href="test.html">' + icon('test') + '測試模式</a>' : '') +
       '<button class="menu-row" id="umOut">' + icon('logout') + '登出</button></div>');
     $$('[data-go]', m.el).forEach(function (b) { b.onclick = function () { m.close(); BM.go(b.dataset.go); }; });
-    $('#umOut', m.el).onclick = function () { m.close(); if (confirm('確定要登出？')) BM.logout(); };
+    $('#umOut', m.el).onclick = async function () { m.close(); if (await BM.ask('確定要登出？', { ok: '登出' })) BM.logout(); };
   }
 
   // ---------------- 網址切換 ----------------
@@ -327,7 +327,7 @@
     if (pb) {
       A.init(me);
       A.tick();
-      pb.onclick = function () { A.doPunch(pb.dataset.punch, function (t) { P.home.att = t; BM.cache('portal', P); renderHome(box); }); };
+      A.bindPunch($('.home-att', box), function (t) { P.home.att = t; BM.cache('portal', P); renderHome(box); });
     }
     $$('[data-ev]', box).forEach(function (a) {
       a.onclick = function () { setTimeout(function () { BM.modules.events.openEvent(a.dataset.ev); }, 400); };
@@ -423,7 +423,7 @@
       ['#mOld', '#mNew', '#mNew2'].forEach(function (s) { $(s).value = ''; });
       BM.toast('密碼已修改' + (me.admin ? '。LINE 綁定也請改用新密碼' : ''));
     };
-    $('#mOut').onclick = function () { if (confirm('確定要登出？')) BM.logout(); };
+    $('#mOut').onclick = async function () { if (await BM.ask('確定要登出？', { ok: '登出' })) BM.logout(); };
     $$('#avaGrid [data-ava]').forEach(function (b) {
       b.onclick = async function () {
         var me2 = await BM.run(function () { return BM.api('setAvatar', { token: token(), avatar: b.dataset.ava }); });

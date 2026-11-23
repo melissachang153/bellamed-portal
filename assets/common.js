@@ -153,6 +153,38 @@ var BM = (function () {
     return { el: wrap.querySelector('.modal'), close: close };
   }
 
+  // 網站自己的確認視窗（取代瀏覽器內建的 confirm，標題不會出現網址）
+  // msg 第一行當標題、其餘當說明；opts：{ title, ok, cancel, danger }。回傳 Promise<true/false>
+  function ask(msg, opts) {
+    opts = opts || {};
+    var lines = String(msg || '').split('\n');
+    var title = opts.title || lines.shift();
+    var body = (opts.title ? lines : lines).join('\n').trim();
+    var danger = opts.danger !== undefined ? opts.danger : /刪除|移除/.test(title);
+    return new Promise(function (resolve) {
+      var done = false;
+      var m = modal('<h2 class="ask-title">' + esc(title) + '</h2>' + (body ? '<p class="ask-body">' + esc(body).replace(/\n/g, '<br>') + '</p>' : '') +
+        '<div class="btn-row ask-btns"><button class="btn ghost" data-no>' + esc(opts.cancel || '取消') + '</button>' +
+        '<button class="btn' + (danger ? ' danger-fill' : '') + '" data-yes>' + esc(opts.ok || '確定') + '</button></div>',
+        { onClose: function () { if (!done) resolve(false); } });
+      var finish = function (v) { done = true; m.close(); resolve(v); };
+      m.el.querySelector('[data-yes]').onclick = function () { finish(true); };
+      m.el.querySelector('[data-no]').onclick = function () { finish(false); };
+      m.el.querySelector('[data-yes]').focus();
+    });
+  }
+  // 只有一個「知道了」按鈕的通知視窗；opts：{ tone: 'ok' | 'warn' }
+  function notice(title, body, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var m = modal('<div class="notice ' + (opts.tone || 'ok') + '"><h2 class="ask-title">' + esc(title) + '</h2>' +
+        (body ? '<p class="ask-body">' + esc(body).replace(/\n/g, '<br>') + '</p>' : '') +
+        '<div class="btn-row ask-btns"><button class="btn" data-yes>知道了</button></div></div>', { onClose: function () { resolve(); } });
+      m.el.querySelector('[data-yes]').onclick = function () { m.close(); };
+      m.el.querySelector('[data-yes]').focus();
+    });
+  }
+
   function meetTimesHtml(ev, myRegion) {
     var dates = ev.dates || [];
     if (!dates.length) return '';
@@ -169,7 +201,7 @@ var BM = (function () {
   }
 
   // ---- 版本與問題回報 ----
-  var VERSION = '2.1.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
+  var VERSION = '2.2.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
   var UPDATED = '2026/11/23';
 
   function footer(pageName, whoFn) {
@@ -265,7 +297,7 @@ var BM = (function () {
     VERSION: VERSION, UPDATED: UPDATED, footer: footer, cache: cache, cached: cached, clearCache: clearCache, swr: swr,
     recordsTable: recordsTable, yearChips: yearChips, yearSelect: yearSelect, recordsHead: recordsHead, realApi: realApi, mock: null,
     store: store, api: api, fmtDate: fmtDate, fmtRange: fmtRange, today: today, esc: esc, sess: sess,
-    img: img, fileUrl: fileUrl, linkify: linkify, toast: toast, busy: busy, run: run, modal: modal,
+    img: img, fileUrl: fileUrl, linkify: linkify, toast: toast, busy: busy, run: run, modal: modal, ask: ask, notice: notice,
     meetTimesHtml: meetTimesHtml, onAuthFail: null, onPwChange: null, onReauth: null
   };
 })();

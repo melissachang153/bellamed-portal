@@ -45,7 +45,8 @@ var ATT_MOCK = function (opts) {
     service: svc,
     handlers: {
       attToday: function (d) { return svc.today(me(d)); },
-      attPunch: function (d) { return svc.punch(me(d), d.kind); },
+      attPunch: function (d) { return svc.punch(me(d), d.kind, !!d.overwrite); },
+      attOvertime: function (d) { return svc.overtime(me(d), String(d.year || '')); },
       attMonth: function (d) { return svc.month(me(d), String(d.ym || ''), String(d.staffId || '')); },
       attTeam: function (d) { return svc.team(me(d), String(d.date || '')); },
       attSaveFix: function (d) { return svc.saveFix(me(d), String(d.id || ''), d.data || {}); },
