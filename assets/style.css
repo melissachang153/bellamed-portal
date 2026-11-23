@@ -272,7 +272,7 @@ details.set-sec[open] { padding-bottom: 14px; }
 
 .layout { display: flex; align-items: flex-start; }
 .side {
-  width: 232px; flex: none; position: sticky; top: 56px; height: calc(100vh - 56px); overflow-y: auto;
+  width: 248px; flex: none; position: sticky; top: 56px; height: calc(100vh - 56px); overflow-y: auto;
   background: #fff; border-right: 1px solid var(--line); padding: 12px 10px 24px;
 }
 .nav-item {
@@ -372,7 +372,7 @@ body.test-mode .app-head { top: 0; }
 }
 .side-btn:hover { background: #f1f6f6; color: var(--brand); }
 .app-head { padding-left: 8px; }
-@media (min-width: 960px) { .side { transition: margin-left .2s; } body.side-closed .side { margin-left: -232px; } }
+@media (min-width: 960px) { .side { transition: margin-left .2s; } body.side-closed .side { margin-left: -248px; } }
 .side-mask { display: none; position: fixed; inset: 56px 0 0; z-index: 25; background: rgba(0,0,0,.25); }
 .nav-sec { margin-top: 10px; }
 .nav-group {
@@ -386,3 +386,19 @@ body.test-mode .app-head { top: 0; }
 .nav-sec.folded .nav-items { display: none; }
 .nav-sec.folded.has-on .nav-group { color: var(--brand); }
 .nav-item { padding-left: 14px; }
+
+/* 線條圖示 */
+.nic { width: 20px; height: 20px; flex: none; }
+.nav-item { gap: 14px; padding-left: 12px; }
+.nav-item > span:not(.soon) { flex: 1; min-width: 0; }
+.nav-item .nic { color: #4d5b5c; }
+.nav-item.on .nic { color: var(--brand); }
+.tile .nic { width: 26px; height: 26px; color: var(--brand); }
+.tile.off .nic { color: var(--muted); }
+.bottom-nav a span .nic { width: 23px; height: 23px; display: block; }
+.nav-item { border-radius: 99px; }
+.nav-item > span:not(.soon) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-item { gap: 12px; }
+.hc-title { display: flex; align-items: center; gap: 8px; }
+.hc-title .nic { color: var(--brand); }
+.side .nav-sec:first-child { margin-top: 0; }

@@ -151,16 +151,40 @@
   }
 
   // 外框：頁首、左側選單、手機下方常用列
+  // 單色線條圖示（顏色跟著文字走）
+  var ICON_PATHS = {
+    home: '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/>',
+    events: '<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4M9.5 15l2 2 3.5-3.5"/>',
+    repair: '<path d="M14.7 6.3a4 4 0 0 0-5.2 5.2L4.5 16.5a1.8 1.8 0 0 0 2.5 2.5l5-5a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.3-.5-.5-2.3z"/>',
+    training: '<path d="M2.5 9 12 4.5 21.5 9 12 13.5z"/><path d="M6.5 11v4.5c1.4 1.6 3.3 2.5 5.5 2.5s4.1-.9 5.5-2.5V11M21.5 9v5"/>',
+    attendance: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    leave: '<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4M9.5 15h5"/>',
+    apply: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5M9 12.5h6M9 16h4"/>',
+    assets: '<rect x="3" y="4.5" width="18" height="11.5" rx="2"/><path d="M9 20h6M12 16v4"/>',
+    news: '<path d="M4 10v4a1 1 0 0 0 1 1h2.5l5.5 4V5L7.5 9H5a1 1 0 0 0-1 1z"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6M19 7a7 7 0 0 1 0 10"/>',
+    rules: '<path d="M6 4h10.5A2.5 2.5 0 0 1 19 6.5V20H8.5A2.5 2.5 0 0 1 6 17.5z"/><path d="M6 17.5A2.5 2.5 0 0 1 8.5 15H19M10 8h5"/>',
+    me: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+    review: '<rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+    other: '<rect x="5" y="5" width="14" height="14" rx="3"/>'
+  };
+  function icon(key) {
+    return '<svg class="nic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      (ICON_PATHS[key] || ICON_PATHS.other) + '</svg>';
+  }
+  BM.icon = icon;
+  var BOTTOM_ICON = { 'home': 'home', 'attendance/punch': 'attendance', 'attendance/leave': 'leave', 'me': 'me' };
+  $$('#bottomNav a').forEach(function (a) { var s = a.querySelector('span'); if (s) s.innerHTML = icon(BOTTOM_ICON[a.dataset.r]); });
+
   function drawFrame() {
     var me = P.me;
     $('#who').textContent = me.name;
     var fold = BM.store('navFold') || {};
-    $('#sideNav').innerHTML = '<a href="#/home" data-r="home" class="nav-item">首頁</a>' +
+    $('#sideNav').innerHTML =
       P.menu.map(function (g) {
         return '<div class="nav-sec' + (fold[g.name] ? ' folded' : '') + '">' +
           '<button type="button" class="nav-group" aria-expanded="' + !fold[g.name] + '"><span>' + esc(g.name) + '</span><span class="chev" aria-hidden="true"></span></button>' +
           '<div class="nav-items">' + g.items.map(function (it) {
-            return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item">' + esc(it.name) +
+            return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item">' + icon(it.key) + '<span>' + esc(it.name) + '</span>' +
               (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
           }).join('') + '</div></div>';
       }).join('');
@@ -261,11 +285,11 @@
     var html = '<div class="hello"><h2>' + hi + '，' + esc(me.name) + '</h2><div class="muted">' + BM.fmtDate(BM.today()) + '</div></div>';
     html += '<div class="home-grid">';
     if (att) {
-      html += '<a class="card home-card" href="#/attendance"><div class="hc-title">⏰ 今日出勤</div>' +
+      html += '<a class="card home-card" href="#/attendance"><div class="hc-title">' + icon('attendance') + '今日出勤</div>' +
         '<div class="muted small">出勤紀錄即將推出，完成後可以在這裡打卡。</div></a>';
     }
     if (isAdmin()) {
-      html += '<a class="card home-card" href="#/review"><div class="hc-title">✅ 待我審核</div>' +
+      html += '<a class="card home-card" href="#/review"><div class="hc-title">' + icon('review') + '待我審核</div>' +
         (h.pending ? '<div><span class="big-num">' + h.pending + '</span> 件醫學會修正申請</div>' : '<div class="muted small">目前沒有待審核的申請</div>') + '</a>';
     }
     html += '</div>';
@@ -279,7 +303,7 @@
     // 手機沒有左側選單：首頁下方列出全部功能（電腦版由左側選單取代，不重複顯示）
     html += '<div class="home-menu">' + P.menu.map(function (g) {
       return '<div class="section-title">' + esc(g.name) + '</div><div class="tiles">' + g.items.map(function (it) {
-        return '<a class="tile' + (it.ready ? '' : ' off') + '" href="#/' + it.key + '">' +
+        return '<a class="tile' + (it.ready ? '' : ' off') + '" href="#/' + it.key + '">' + icon(it.key) +
           '<span>' + esc(it.name) + '</span>' + (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
       }).join('') + '</div>';
     }).join('') + '</div>';
