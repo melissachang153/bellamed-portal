@@ -1,4 +1,4 @@
-/* 寶漾內部系統：共用工具（API、登入狀態、格式化） */
+/* 寶漾行政系統：共用工具（API、登入狀態、格式化） */
 var BM = (function () {
   var KEY = window.BM_PREFIX || 'bellamed.'; // 測試頁用另一組前綴，不會動到正式登入
 

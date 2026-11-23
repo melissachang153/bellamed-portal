@@ -1,4 +1,4 @@
-/* 寶漾內部系統：外框（登入、選單、首頁、我的、管理中心、網址切換） */
+/* 寶漾行政系統：外框（登入、選單、首頁、我的、管理中心、網址切換） */
 (function () {
   var $ = function (s, root) { return (root || document).querySelector(s); };
   var $$ = function (s, root) { return Array.prototype.slice.call((root || document).querySelectorAll(s)); };
@@ -154,18 +154,45 @@
   function drawFrame() {
     var me = P.me;
     $('#who').textContent = me.name;
-    $('#sideNav').innerHTML = '<a href="#/home" data-r="home" class="nav-item"><span class="ic">🏠</span>首頁</a>' +
+    var fold = BM.store('navFold') || {};
+    $('#sideNav').innerHTML = '<a href="#/home" data-r="home" class="nav-item">首頁</a>' +
       P.menu.map(function (g) {
-        return '<div class="nav-group">' + esc(g.name) + '</div>' + g.items.map(function (it) {
-          return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item"><span class="ic">' + it.icon + '</span>' + esc(it.name) +
-            (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
-        }).join('');
+        return '<div class="nav-sec' + (fold[g.name] ? ' folded' : '') + '">' +
+          '<button type="button" class="nav-group" aria-expanded="' + !fold[g.name] + '"><span>' + esc(g.name) + '</span><span class="chev" aria-hidden="true"></span></button>' +
+          '<div class="nav-items">' + g.items.map(function (it) {
+            return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item">' + esc(it.name) +
+              (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
+          }).join('') + '</div></div>';
       }).join('');
+    $$('#sideNav .nav-group').forEach(function (b) {
+      b.onclick = function () {
+        var sec = b.parentNode, name = b.firstChild.textContent, f = BM.store('navFold') || {};
+        var folded = sec.classList.toggle('folded');
+        b.setAttribute('aria-expanded', String(!folded));
+        if (folded) f[name] = 1; else delete f[name];
+        BM.store('navFold', f);
+      };
+    });
     markNav();
   }
+  // 左側選單整個收起／展開（電腦記住設定；手機變成滑出的抽屜）
+  var mobile = window.matchMedia('(max-width: 959px)');
+  function setSide(open) {
+    if (mobile.matches) document.body.classList.toggle('side-open', open);
+    else { document.body.classList.toggle('side-closed', !open); BM.store('sideClosed', open ? null : 1); }
+    var b = $('#sideBtn'), t = open ? '收合選單' : '展開選單';
+    b.title = t; b.setAttribute('aria-label', t);
+  }
+  if (BM.store('sideClosed')) document.body.classList.add('side-closed');
+  $('#sideBtn').onclick = function () {
+    setSide(mobile.matches ? !document.body.classList.contains('side-open') : document.body.classList.contains('side-closed'));
+  };
+  $('#sideMask').onclick = function () { setSide(false); };
   function markNav() {
+    document.body.classList.remove('side-open');
     var r = currentRoute().split('/')[0];
     $$('#sideNav .nav-item').forEach(function (a) { a.classList.toggle('on', a.dataset.r === r); });
+    $$('#sideNav .nav-sec').forEach(function (s) { s.classList.toggle('has-on', !!s.querySelector('.nav-item.on')); });
     var sub = currentRoute();
     $$('#bottomNav a').forEach(function (a) {
       var on = a.dataset.r === sub || (a.dataset.r === 'home' && r === 'home');
@@ -212,14 +239,14 @@
     var mod = moduleOf(parts[0]);
     if (!mod) return BM.go('home');
     if (mod.ready && BM.modules[mod.key]) {
-      box.innerHTML = '<div class="page-head"><h2>' + mod.icon + ' ' + esc(mod.name) + '</h2></div><div id="modRoot"></div>';
+      box.innerHTML = '<div class="page-head"><h2>' + esc(mod.name) + '</h2></div><div id="modRoot"></div>';
       return BM.modules[mod.key].mount($('#modRoot'), P.me, parts[1]);
     }
     renderSoon(box, mod);
   }
 
   function renderSoon(box, mod) {
-    box.innerHTML = '<div class="page-head"><h2>' + mod.icon + ' ' + esc(mod.name) + '</h2></div>' +
+    box.innerHTML = '<div class="page-head"><h2>' + esc(mod.name) + '</h2></div>' +
       '<div class="card empty"><div style="font-size:40px">🚧</div><b>即將推出</b>' +
       '<p class="small muted">這個功能還在規劃中，完成後會在這裡開放。</p>' +
       '<div class="btn-row" style="justify-content:center"><a class="btn ghost" href="#/home">回首頁</a></div></div>';
@@ -252,7 +279,7 @@
     // 手機沒有左側選單：首頁下方列出全部功能（電腦版由左側選單取代，不重複顯示）
     html += '<div class="home-menu">' + P.menu.map(function (g) {
       return '<div class="section-title">' + esc(g.name) + '</div><div class="tiles">' + g.items.map(function (it) {
-        return '<a class="tile' + (it.ready ? '' : ' off') + '" href="#/' + it.key + '"><span class="t-ic">' + it.icon + '</span>' +
+        return '<a class="tile' + (it.ready ? '' : ' off') + '" href="#/' + it.key + '">' +
           '<span>' + esc(it.name) + '</span>' + (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
       }).join('') + '</div>';
     }).join('') + '</div>';
@@ -320,7 +347,7 @@
     var A = await BM.run(function () { return BM.api('portalAdmin', { token: BM.store('adminToken') }); });
     var menu = JSON.parse(JSON.stringify(A.menu));
     var perms = JSON.parse(JSON.stringify(A.perms));
-    var name = function (k) { var m = A.modules.filter(function (x) { return x.key === k; })[0]; return m ? m.icon + ' ' + m.name : k; };
+    var name = function (k) { var m = A.modules.filter(function (x) { return x.key === k; })[0]; return m ? m.name : k; };
     function draw() {
       var el = $('#menuAdm');
       if (!el) return;
@@ -342,7 +369,7 @@
         '<div class="section-title">各角色可以使用的功能</div>' +
         '<div class="card" style="padding:0"><table class="grid"><thead><tr><th>功能</th><th class="num">主管</th><th class="num">職員</th></tr></thead><tbody>' +
         A.modules.map(function (m) {
-          return '<tr><td>' + esc(m.icon + ' ' + m.name) + (m.ready ? '' : ' <span class="soon">即將推出</span>') + '</td>' +
+          return '<tr><td>' + esc(m.name) + (m.ready ? '' : ' <span class="soon">即將推出</span>') + '</td>' +
             ['manager', 'staff'].map(function (r) {
               return '<td class="num"><input type="checkbox" class="cb" data-perm="' + r + ',' + m.key + '"' + (perms[r][m.key] ? ' checked' : '') + ' aria-label="' + esc(m.name) + '"></td>';
             }).join('') + '</tr>';
