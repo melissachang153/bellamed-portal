@@ -169,7 +169,7 @@ var BM = (function () {
   }
 
   // ---- 版本與問題回報 ----
-  var VERSION = '2.0.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
+  var VERSION = '2.1.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
   var UPDATED = '2026/11/23';
 
   function footer(pageName, whoFn) {

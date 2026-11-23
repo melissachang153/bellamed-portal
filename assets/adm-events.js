@@ -461,7 +461,7 @@
       (list.length ? '' : '<tr><td colspan="5" class="muted">沒有資料</td></tr>') +
       list.map(function (s) {
         return '<tr><td>' + esc([s.name, s.enName].filter(Boolean).join(' ')) + '</td><td>' + esc(s.region || '—') + '</td><td style="white-space:nowrap">' +
-          (s.admin ? '管理員' : s.role === 'manager' ? '主管' : '職員') +
+          (s.admin ? '管理員' : s.role === 'manager' ? '主管' : s.role === 'finance' ? '財務' : '職員') +
           (!s.admin && !s.counted ? '<div class="small muted">不列入統計</div>' : '') + '</td><td>' +
           (/^A\d{3}$/.test(s.id) ? '<span class="badge gray">非正式</span> ' : '') +
           (s.active ? '<span class="badge">在職</span>' : '<span class="badge gray">停用</span>') +
@@ -499,12 +499,17 @@
       (isNew ? '<label class="chk" style="margin-bottom:4px"><input type="checkbox" id="sTemp">非正式員工（員編自動編為 A 開頭三碼流水號）</label>' +
         '<label class="f">員編</label><input class="input" id="sId" inputmode="numeric" value="">' : '') +
       '<label class="f">地區</label>' + radios('sReg', REG.map(function (r) { return [r, r + '區']; }), s.region) +
-      (s.admin ? '' : '<label class="f">角色</label>' + radios('sRole', [['staff', '職員'], ['manager', '主管']], s.role === 'manager' ? 'manager' : 'staff') +
+      (s.admin ? '' : '<label class="f">角色</label>' + radios('sRole', [['staff', '職員'], ['manager', '主管'], ['finance', '財務']], s.role === 'manager' || s.role === 'finance' ? s.role : 'staff') +
         '<label class="chk' + (s.counted ? ' on' : '') + '" style="margin-top:10px"><input type="checkbox" id="sCounted"' + (s.counted ? ' checked' : '') + '>列入統計（可以報名，會出現在報名名單與參加紀錄）</label>') +
       '<div class="row2"><div><label class="f">中文名' + (isTemp ? '（選填）' : '') + '</label><input class="input" id="sName" value="' + esc(s.name) + '"></div>' +
       '<div><label class="f">英文名（登入帳號）</label><input class="input" id="sEn" autocapitalize="off" value="' + esc(s.enName) + '"></div></div>' +
       '<div class="row2"><div><label class="f">部門</label><input class="input" id="sDept" value="' + esc(s.dept) + '"></div>' +
       '<div><label class="f" id="sBdayLbl">' + pwLabel(isTemp) + '</label><input class="input" id="sBday" inputmode="numeric" maxlength="4" value="' + esc(s.birthday) + '"></div></div>' +
+      '<div class="row2"><div><label class="f">到職日</label><input class="input" id="sHire" type="date" value="' + esc(s.hireDate || '') + '"></div>' +
+      '<div><label class="f">直屬主管</label><select class="input" id="sMgr"><option value="">自動（主管）</option>' +
+      (D.staff || []).filter(function (x) { return x.active && x.id !== s.id && (x.admin || x.role === 'manager'); }).map(function (x) {
+        return '<option value="' + esc(x.id) + '"' + (x.id === s.managerId ? ' selected' : '') + '>' + esc(x.enName || x.name) + '</option>';
+      }).join('') + '</select></div></div>' +
       '<label class="f">備註</label><input class="input" id="sNote" value="' + esc(s.note) + '">' +
       (isNew ? '<p class="small muted">第一次登入時，需要用預設密碼登入並重新設定。</p>' :
         s.admin ? '<p class="small muted">這是管理員帳號，不能停用，也不列入報名統計。</p>' :
@@ -540,7 +545,7 @@
       var temp = !!(tempBox && tempBox.checked);
       var st = { id: isNew ? (temp ? '' : $('#sId', r).value.trim()) : s.id, temp: temp, name: $('#sName', r).value.trim(), enName: $('#sEn', r).value.trim(), region: picked('sReg'),
         dept: $('#sDept', r).value.trim(), birthday: $('#sBday', r).value.trim(), note: $('#sNote', r).value.trim(),
-        active: isNew || s.admin ? true : $('#sActive', r).checked };
+        active: isNew || s.admin ? true : $('#sActive', r).checked, hireDate: $('#sHire', r).value, managerId: $('#sMgr', r).value };
       if (!s.admin) { st.role = picked('sRole'); st.counted = $('#sCounted', r).checked; }
       if (!st.region) return BM.toast('請選擇地區', true);
       D = await call('saveStaff', { staff: st });

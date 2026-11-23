@@ -8,6 +8,8 @@
 
   function token() { return BM.store('staffToken'); }
   function isAdmin() { return !!(P && P.me && P.me.admin); }
+  // 會收到審核單的人：管理員（HR）、主管、財務
+  function isApprover() { return isAdmin() || !!(P && P.me && ['admin', 'manager', 'finance'].indexOf(P.me.role) >= 0); }
 
   // ---------------- 登入／登出 ----------------
   BM.go = function (path) {
@@ -60,6 +62,9 @@
 
   function showOnly(id) {
     ['loginView', 'pwView', 'appView'].forEach(function (v) { $('#' + v).hidden = v !== id; });
+    // 版本列：登入後放在內容欄的最下面（不另外撐高頁面），登入前放在頁面最下面
+    var f = document.querySelector('.site-foot');
+    if (f) (id === 'appView' ? $('.main-col') : document.body).appendChild(f);
   }
   function showLogin() {
     showOnly('loginView');
@@ -165,6 +170,9 @@
     rules: '<path d="M6 4h10.5A2.5 2.5 0 0 1 19 6.5V20H8.5A2.5 2.5 0 0 1 6 17.5z"/><path d="M6 17.5A2.5 2.5 0 0 1 8.5 15H19M10 8h5"/>',
     me: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
     review: '<rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+    admin: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
+    test: '<path d="M9.5 3.5h5M10.5 3.5v5.2L5.3 18a1.6 1.6 0 0 0 1.4 2.5h10.6a1.6 1.6 0 0 0 1.4-2.5l-5.2-9.3V3.5M7.8 14h8.4"/>',
+    logout: '<path d="M14 4.5H7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h7M10.5 12H20M16.5 8.5 20 12l-3.5 3.5"/>',
     other: '<rect x="5" y="5" width="14" height="14" rx="3"/>'
   };
   function icon(key) {
@@ -178,6 +186,11 @@
   function drawFrame() {
     var me = P.me;
     $('#who').textContent = me.name;
+    var av = $('#userBtn .avatar');
+    if (!av.dataset.def) av.dataset.def = av.innerHTML;
+    var has = me.avatar && BM.avatars && BM.avatars.has(me.avatar);
+    av.classList.toggle('pic', !!has);
+    av.innerHTML = has ? BM.avatars.svg(me.avatar, 30) : av.dataset.def;
     var fold = BM.store('navFold') || {};
     $('#sideNav').innerHTML =
       P.menu.map(function (g) {
@@ -227,17 +240,15 @@
   // 頁首右上角：個人選單
   function openUserMenu() {
     var me = P.me;
-    var items = [['me', '👤', '我的']];
-    if (isAdmin()) {
-      items.push(['review', '✅', '待我審核' + (P.home.pending ? '（' + P.home.pending + '）' : '')]);
-      items.push(['admin', '⚙️', '管理中心']);
-    }
+    var items = [['me', 'me', '我的']];
+    if (isApprover()) items.push(['review', 'review', '待我審核' + (P.home.pending ? '（' + P.home.pending + '）' : '')]);
+    if (isAdmin()) items.push(['admin', 'admin', '管理中心']);
     var m = BM.modal('<h2>' + esc(me.name) + (roleLabel(me) ? ' <span class="badge gray">' + roleLabel(me) + '</span>' : '') + '</h2>' +
       '<div class="menu-list">' + items.map(function (i) {
-        return '<button class="menu-row" data-go="' + i[0] + '"><span class="ic">' + i[1] + '</span>' + esc(i[2]) + '</button>';
+        return '<button class="menu-row" data-go="' + i[0] + '">' + icon(i[1]) + '' + esc(i[2]) + '</button>';
       }).join('') +
-      (isAdmin() && !TEST ? '<a class="menu-row" href="test.html"><span class="ic">🧪</span>測試模式</a>' : '') +
-      '<button class="menu-row" id="umOut"><span class="ic">🚪</span>登出</button></div>');
+      (isAdmin() && !TEST ? '<a class="menu-row" href="test.html">' + icon('test') + '測試模式</a>' : '') +
+      '<button class="menu-row" id="umOut">' + icon('logout') + '登出</button></div>');
     $$('[data-go]', m.el).forEach(function (b) { b.onclick = function () { m.close(); BM.go(b.dataset.go); }; });
     $('#umOut', m.el).onclick = function () { m.close(); if (confirm('確定要登出？')) BM.logout(); };
   }
@@ -258,7 +269,7 @@
     window.scrollTo(0, 0);
     if (r === 'home') return renderHome(box);
     if (r === 'me') return renderMe(box);
-    if (parts[0] === 'review' && isAdmin()) return renderAdmin(box, 'events', 'review', '待我審核');
+    if (parts[0] === 'review' && isApprover()) return parts[1] === 'events' && isAdmin() ? renderAdmin(box, 'events', 'review', '醫學會修正申請') : renderReview(box);
     if (parts[0] === 'admin' && isAdmin()) return renderAdmin(box, parts[1] || 'events', parts[2]);
     var mod = moduleOf(parts[0]);
     if (!mod) return BM.go('home');
@@ -284,13 +295,17 @@
     var att = moduleOf('attendance');
     var html = '<div class="hello"><h2>' + hi + '，' + esc(me.name) + '</h2><div class="muted">' + BM.fmtDate(BM.today()) + '</div></div>';
     html += '<div class="home-grid">';
-    if (att) {
-      html += '<a class="card home-card" href="#/attendance"><div class="hc-title">' + icon('attendance') + '今日出勤</div>' +
-        '<div class="muted small">出勤紀錄即將推出，完成後可以在這裡打卡。</div></a>';
+    var A = BM.modules.attendance;
+    if (att && h.att && A) {
+      html += '<div class="card home-card home-att"><div class="hc-title"><a href="#/attendance">' + icon('attendance') + '今日出勤</a>' +
+        '<a class="small" href="#/attendance/records" style="margin-left:auto">出勤紀錄 ›</a></div>' + A.todayCard(h.att) + A.punchButton(h.att) + '</div>';
     }
-    if (isAdmin()) {
+    if (isApprover()) {
+      var parts = [];
+      if (h.pendingAtt) parts.push('<div><span class="big-num">' + h.pendingAtt + '</span> 件出勤申請</div>');
+      if (h.pendingEvents) parts.push('<div><span class="big-num">' + h.pendingEvents + '</span> 件醫學會修正申請</div>');
       html += '<a class="card home-card" href="#/review"><div class="hc-title">' + icon('review') + '待我審核</div>' +
-        (h.pending ? '<div><span class="big-num">' + h.pending + '</span> 件醫學會修正申請</div>' : '<div class="muted small">目前沒有待審核的申請</div>') + '</a>';
+        (parts.length ? parts.join('') : '<div class="muted small">目前沒有待審核的申請</div>') + '</a>';
     }
     html += '</div>';
     if (h.events) {
@@ -308,27 +323,88 @@
       }).join('') + '</div>';
     }).join('') + '</div>';
     box.innerHTML = html;
+    var pb = $('.home-att [data-punch]', box);
+    if (pb) {
+      A.init(me);
+      A.tick();
+      pb.onclick = function () { A.doPunch(pb.dataset.punch, function (t) { P.home.att = t; BM.cache('portal', P); renderHome(box); }); };
+    }
     $$('[data-ev]', box).forEach(function (a) {
       a.onclick = function () { setTimeout(function () { BM.modules.events.openEvent(a.dataset.ev); }, 400); };
     });
+  }
+
+  // ---------------- 待我審核 ----------------
+  function renderReview(box) {
+    var A = BM.modules.attendance;
+    var h = P.home || {};
+    box.innerHTML = '<div class="page-head"><h2>待我審核</h2></div><div id="revRoot"><div class="card empty">讀取中…</div></div>';
+    var key = 'review_' + String(P.me.name).toLowerCase();
+    var draw = function (r) {
+      var root = $('#revRoot');
+      if (!root) return;
+      root.innerHTML =
+        (isAdmin() ? '<a class="card list-item" href="#/review/events"><div class="grow"><b>醫學會修正申請</b><div class="small muted">' +
+          (h.pendingEvents ? h.pendingEvents + ' 件待審核' : '目前沒有待審核的申請') + '</div></div><span class="muted">›</span></a>' : '') +
+        '<div class="section-title">出勤申請（' + r.todo.length + '）</div>' +
+        (r.todo.length ? r.todo.map(function (x) { return A.reqCard(x, { who: true, decide: true }); }).join('') : '<div class="card empty">目前沒有待審核的出勤申請</div>') +
+        (r.done.length ? '<div class="section-title">最近審核過的</div>' + r.done.map(function (x) { return A.reqCard(x, { who: true, decide: true }); }).join('') : '');
+      $$('.att-req', root).forEach(function (el) {
+        var x = r.todo.filter(function (y) { return y.id === el.dataset.id; })[0];
+        if (!x) return;
+        var ok = $('[data-ok]', el), no = $('[data-no]', el);
+        if (ok) ok.onclick = async function () {
+          await BM.run(function () { return BM.api('attDecide', { token: token(), id: x.id, approve: true }); });
+          BM.toast('已核准');
+          refreshAfterReview();
+        };
+        if (no) no.onclick = function () {
+          var m = BM.modal('<h2>退件</h2><p class="small muted" style="margin:0">' + esc(x.staff + '・' + x.typeLabel + '・' + x.summary) + '</p>' +
+            '<label class="f" for="rjNote">退件原因（申請人會看到）</label><input class="input" id="rjNote" maxlength="200">' +
+            '<div class="btn-row"><button class="btn danger block" id="rjOk">確定退件</button></div>');
+          $('#rjNote', m.el).focus();
+          $('#rjOk', m.el).onclick = async function () {
+            var note = $('#rjNote', m.el).value.trim();
+            if (!note) return BM.toast('請填寫退件原因', true);
+            await BM.run(function () { return BM.api('attDecide', { token: token(), id: x.id, approve: false, note: note }); });
+            m.close();
+            BM.toast('已退件');
+            refreshAfterReview();
+          };
+        };
+      });
+    };
+    BM.swr(key, function () { return BM.api('attReview', { token: token() }); }, draw);
+  }
+  function refreshAfterReview() {
+    BM.cache('review_' + String(P.me.name).toLowerCase(), null);
+    refreshPortal();
+    route();
   }
 
   // ---------------- 我的 ----------------
   function renderMe(box) {
     var me = P.me;
     var canCor = me.pages && me.pages.corrections;
-    box.innerHTML = '<div class="page-head"><h2>👤 我的</h2></div>' +
+    box.innerHTML = '<div class="page-head"><h2>我的</h2></div>' +
       '<div class="card"><div class="rec-head"><b style="font-size:18px">' + esc(me.name) + '</b>' +
       (roleLabel(me) ? '<span class="badge gray">' + roleLabel(me) + '</span>' : '') + '</div>' +
       '<div class="small muted">' + esc(me.region || '') + '區</div></div>' +
 
+      '<div class="section-title">頭像</div><div class="card"><div class="ava-grid" id="avaGrid">' +
+      '<button type="button" class="ava-pick' + (!me.avatar ? ' on' : '') + '" data-ava="" title="預設"><span class="ava-def">' + icon('me') + '</span><span>預設</span></button>' +
+      BM.avatars.list.map(function (a) {
+        return '<button type="button" class="ava-pick' + (me.avatar === a.key ? ' on' : '') + '" data-ava="' + a.key + '" title="' + a.name + '">' + BM.avatars.svg(a.key, 52) + '<span>' + a.name + '</span></button>';
+      }).join('') + '</div></div>' +
+
       '<div class="section-title">我的申請</div>' +
-      '<div class="card">' + (canCor ? '<a class="menu-row" href="#/events/corrections"><span class="ic">🏥</span>醫學會修正申請</a>' : '') +
-      '<div class="menu-row off"><span class="ic">⏰</span>請假・加班・補登<span class="soon">即將推出</span></div></div>' +
+      '<div class="card">' + (canCor ? '<a class="menu-row" href="#/events/corrections">' + icon('events') + '醫學會修正申請</a>' : '') +
+      (moduleOf('attendance') ? '<a class="menu-row" href="#/attendance/fix">' + icon('attendance') + '補登打卡</a>' : '') +
+      '<div class="menu-row off">' + icon('leave') + '請假・加班<span class="soon">即將推出</span></div></div>' +
 
-      '<div class="section-title">假勤餘額</div><div class="card small muted">出勤紀錄上線後，這裡會顯示特休和補休的剩餘時數。</div>' +
+      '<div class="section-title">假勤餘額</div><div class="card small muted">請假功能上線後，這裡會顯示特休和補休的剩餘時數。</div>' +
 
-      '<div class="section-title">通知設定</div><div class="card small muted">出勤紀錄上線後，可以在這裡設定上下班提醒和審核通知。</div>' +
+      '<div class="section-title">通知設定</div><div class="card small muted">推播通知上線後，可以在這裡設定上下班提醒和審核通知。</div>' +
 
       '<div class="section-title">修改密碼</div><div class="card">' +
       '<label class="f" for="mOld">目前的密碼</label><input class="input" id="mOld" type="password" autocomplete="current-password" maxlength="20">' +
@@ -348,19 +424,29 @@
       BM.toast('密碼已修改' + (me.admin ? '。LINE 綁定也請改用新密碼' : ''));
     };
     $('#mOut').onclick = function () { if (confirm('確定要登出？')) BM.logout(); };
+    $$('#avaGrid [data-ava]').forEach(function (b) {
+      b.onclick = async function () {
+        var me2 = await BM.run(function () { return BM.api('setAvatar', { token: token(), avatar: b.dataset.ava }); });
+        P.me = me2; BM.store('staff', me2); BM.cache('portal', P);
+        drawFrame();
+        $$('#avaGrid [data-ava]').forEach(function (x) { x.classList.toggle('on', x === b); });
+        BM.toast('頭像已更新');
+      };
+    });
   }
 
   // ---------------- 管理中心 ----------------
-  var ADMIN_TABS = [['events', '醫學會'], ['staff', '人員'], ['menu', '選單與權限']];
+  var ADMIN_TABS = [['events', '醫學會'], ['attendance', '出勤'], ['staff', '人員'], ['menu', '選單與權限']];
   function renderAdmin(box, tab, sub, title) {
     if (!ADMIN_TABS.some(function (t) { return t[0] === tab; })) tab = 'events';
-    box.innerHTML = '<div class="page-head"><h2>' + (title ? '✅ ' + title : '⚙️ 管理中心') + '</h2>' +
+    box.innerHTML = '<div class="page-head"><h2>' + (title ? title : '管理中心') + '</h2>' +
       (isAdmin() && !TEST ? '<a class="btn small ghost" href="test.html">🧪 測試模式</a>' : '') + '</div>' +
       (title ? '' : '<nav class="tabs top">' + ADMIN_TABS.map(function (t) {
         return '<a href="#/admin/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + '</a>';
       }).join('') + '</nav>') + '<div id="admRoot"></div>';
     var root = $('#admRoot');
     if (tab === 'menu') return renderMenuAdmin(root);
+    if (tab === 'attendance') return BM.admin.attendance.mount(root);
     if (tab === 'staff') return BM.admin.events.mount(root, ['staff'], 'staff');
     return BM.admin.events.mount(root, title ? ['review'] : ['events', 'review', 'records', 'settings'], sub);
   }

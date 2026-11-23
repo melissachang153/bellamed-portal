@@ -13,7 +13,7 @@
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
   <title>寶漾行政系統</title>
-  <link rel="stylesheet" href="assets/style.css?v=2.0.4">
+  <link rel="stylesheet" href="assets/style.css?v=2.1.0">
 </head>
 <body>
   <section id="loginView" hidden>
@@ -51,12 +51,12 @@
     <header class="app-head">
       <button class="side-btn" id="sideBtn" aria-label="收合選單" title="收合選單"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
       <a class="brand" href="#/home"><img src="assets/logo-mark.png" alt=""><span>寶漾行政系統</span></a>
-      <button class="user-btn" id="userBtn" aria-label="個人選單"><span class="avatar">👤</span><span id="who"></span><span aria-hidden="true">▾</span></button>
+      <button class="user-btn" id="userBtn" aria-label="個人選單"><span class="avatar"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span><span id="who"></span><svg class="caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
     </header>
     <div class="layout">
       <nav class="side" id="sideNav" aria-label="功能選單"></nav>
       <div class="side-mask" id="sideMask"></div>
-      <main class="content" id="content"></main>
+      <div class="main-col"><main class="content" id="content"></main></div>
     </div>
     <nav class="bottom-nav" id="bottomNav" aria-label="常用功能">
       <a href="#/home" data-r="home"><span>🏠</span>首頁</a>
@@ -67,10 +67,14 @@
   </section>
 
   <div id="busy" hidden></div>
-  <script src="assets/config.js?v=2.0.4"></script>
-  <script src="assets/common.js?v=2.0.4"></script>
-  <script src="assets/mod-events.js?v=2.0.4"></script>
-  <script src="assets/adm-events.js?v=2.0.4"></script>
-  <script src="assets/shell.js?v=2.0.4"></script>
+  <script src="assets/config.js?v=2.1.0"></script>
+  <script src="assets/common.js?v=2.1.0"></script>
+  <script src="assets/avatars.js?v=2.1.0"></script>
+  <script src="assets/att-core.js?v=2.1.0"></script>
+  <script src="assets/mod-events.js?v=2.1.0"></script>
+  <script src="assets/mod-attendance.js?v=2.1.0"></script>
+  <script src="assets/adm-events.js?v=2.1.0"></script>
+  <script src="assets/adm-attendance.js?v=2.1.0"></script>
+  <script src="assets/shell.js?v=2.1.0"></script>
 </body>
 </html>

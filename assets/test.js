@@ -46,7 +46,7 @@
   function meView(s) {
     var pages = {};
     ['events', 'records', 'corrections'].forEach(function (k) { pages[k] = canSee(s, k); });
-    return { name: s.en, region: s.region, admin: false, role: s.role, counted: s.counted, pages: pages };
+    return { name: s.en, region: s.region, admin: false, role: s.role, counted: s.counted, pages: pages, avatar: s.avatar || '' };
   }
   function userFrom(token) {
     var m = String(token || '').match(/^t:(.+)$/);
@@ -137,12 +137,13 @@
       return { ok: true };
     },
     me: function (d) { var s = userFrom(d.token); return s ? meView(s) : authFail(); },
+    setAvatar: function (d) { var s = userFrom(d.token); if (!s) return authFail(); s.avatar = String(d.avatar || ''); return meView(s); },
     // 入口網站：選單用預設分組（測試模式不讀正式的選單設定）
     portal: function (d) {
       var s = userFrom(d.token);
       if (!s) return authFail();
       var me = meView(s);
-      var M = { events: ['醫學會', '🏥', true], repair: ['設備維修', '🔧'], training: ['教育訓練', '🎓'], attendance: ['出勤紀錄', '⏰'],
+      var M = { events: ['醫學會', '🏥', true], repair: ['設備維修', '🔧'], training: ['教育訓練', '🎓'], attendance: ['出勤紀錄', '⏰', true],
         apply: ['申請與通報', '📝'], assets: ['辦公設備管理', '🖨️'], news: ['公告', '📢'], rules: ['規章', '📘'] };
       var groups = [['業務事項', ['events', 'repair', 'training']], ['行政事項', ['attendance', 'apply', 'assets']], ['公司資訊', ['news', 'rules']]];
       var canEv = me.pages.events || me.pages.records || me.pages.corrections;
@@ -155,7 +156,8 @@
       var evs = me.pages.events ? eventsFor(s).filter(function (e) {
         return e.status !== 'cancelled' && e.dates.length && e.dates[e.dates.length - 1] >= t;
       }).slice(0, 4).map(function (e) { return { id: e.id, name: e.name, dates: e.dates, mine: e.mine.length > 0, peopleCount: e.peopleCount }; }) : null;
-      return { me: me, menu: menu, home: { events: evs, pending: 0 } };
+      var ah = attMock().home(d.token);
+      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt } };
     },
     changePassword: function (d) {
       var s = userFrom(d.token);
@@ -238,8 +240,34 @@
     }
   };
 
+
+  // ---------- 出勤（規則和正式版共用 att-core.js；資料只在這個分頁） ----------
+  var AM = null;
+  function attMock() {
+    if (AM) return AM;
+    var att = DATA.att || { people: [], cal: {} };
+    // 管理員（HR）也要能登入測試，才能測審核流程
+    att.people.forEach(function (p) {
+      if (!staffByEn(p.en)) DATA.staff.push({ en: p.en, region: p.region, role: p.role, counted: false, mustChange: false });
+    });
+    AM = ATT_MOCK({
+      people: function () { return att.people; },
+      cal: function (y) { return att.cal[y] || { days: {}, overrides: [] }; },
+      me: function (token) {
+        var s = userFrom(token);
+        return s ? att.people.filter(function (p) { return p.en.toLowerCase() === s.en.toLowerCase(); })[0] : null;
+      },
+      notify: function (toId, text) {
+        var p = att.people.filter(function (x) { return x.id === toId; })[0];
+        BM.toast('（測試通知給 ' + (p ? p.en : '') + '）' + text.split('\n')[0]);
+      }
+    });
+    Object.keys(AM.handlers).forEach(function (k) { H[k] = AM.handlers[k]; });
+    return AM;
+  }
   BM.mock = function (action, d) {
     return ready.then(wait).then(function () {
+      attMock();
       var fn = H[action];
       if (!fn) throw new Error('測試頁不支援這個動作');
       return fn(d);
