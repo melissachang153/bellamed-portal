@@ -112,6 +112,91 @@
     }).sort(function (a, b) { return b.createdAt.localeCompare(a.createdAt); });
   }
 
+  // ---------- 公告已讀、申訴與通報（只存在這個分頁） ----------
+  // 存在這台電腦的瀏覽器（換身分會重新整理，資料要留著才能測「申訴人送出 → HR 受理」）；「重設測試資料」會清掉
+  var CASE_KEY = 'bellamed.test.casedb';
+  var CDB = (function () { try { return JSON.parse(localStorage.getItem(CASE_KEY) || 'null') || {}; } catch (e) { return {}; } })();
+  var READS = CDB.reads || {}, CASES = CDB.cases || [], CASE_FILES = {}, caseSeq = CDB.seq || 0;
+  function saveCases() { try { localStorage.setItem(CASE_KEY, JSON.stringify({ reads: READS, cases: CASES, seq: caseSeq })); } catch (e) { } }
+  var CASE_ST = { submitted: '待受理', accepted: '調查中', rejected: '不受理', decided: '已決定', appealed: '申復中', received: '處理中', closed: '已結案' };
+  function attPeople() { return (DATA.att && DATA.att.people) || []; }
+  function receiverEn(to) {
+    if (to === 'gm') return 'Andy';
+    var a = attPeople().filter(function (p) { return p.role === 'admin'; })[0];
+    return a ? a.en : 'Melissa';
+  }
+  function caseRole(c, s) { return receiverEn(c.to).toLowerCase() === s.en.toLowerCase() ? 'receiver' : c.en === s.en ? 'applicant' : ''; }
+  function caseTitle(c) { return c.kind === 'notice' ? '知悉通報 ' + c.no : ({ bully: '職場霸凌', harass: '職場性騷擾' }[c.data.type] || '申訴') + ' ' + c.no; }
+  function md5(t) { return String(t || '').slice(5, 10).replace('-', '/'); }
+  function caseSteps(c) {
+    var h = function (a) { return c.history.filter(function (x) { return x.act === a; })[0]; };
+    var rn = receiverEn(c.to), st = function (x, cur) { return x ? 'done' : cur ? 'cur' : 'todo'; };
+    if (c.kind === 'notice') {
+      var rv = h('receive'), cl = h('close');
+      return [{ date: md5(c.createdAt), who: c.en, act: '通報', state: 'done' }, { date: rv ? md5(rv.t) : '', who: rn, act: '收件', state: st(rv, c.status === 'submitted') },
+        { date: cl ? md5(cl.t) : '', who: '', act: '結案', state: st(cl, c.status === 'received') }];
+    }
+    var acc = h('accept'), rej = h('reject'), dec = h('decide'), app = h('appeal'), appd = h('appealDecide'), clo = h('close');
+    var out = [{ date: md5(c.createdAt), who: c.en, act: '申訴', state: 'done' }];
+    if (rej) return out.concat([{ date: md5(rej.t), who: rn, act: '不受理', state: 'bad' }]);
+    return out.concat([
+      { date: acc ? md5(acc.t) : '', who: rn, act: '受理', state: st(acc, c.status === 'submitted') },
+      { date: '', who: rn, act: '調查', state: dec ? 'done' : c.status === 'accepted' ? 'cur' : 'todo' },
+      { date: dec ? md5(dec.t) : '3 個月內', who: rn, act: '決定', state: dec ? 'done' : 'todo' },
+      { date: app ? md5(app.t) : '', who: c.en, act: '申復', state: app ? (appd ? 'done' : 'cur') : 'todo', opt: !app },
+      { date: clo || appd ? md5((clo || appd).t) : '', who: '', act: '結案', state: c.status === 'closed' ? 'done' : 'todo' }]);
+  }
+  function caseSum(c, role) {
+    return { id: c.id, no: c.no, kind: c.kind, title: caseTitle(c), status: c.status, statusLabel: CASE_ST[c.status], createdAt: c.createdAt, steps: caseSteps(c), role: role, applicant: role === 'receiver' ? c.en : '' };
+  }
+  function stamp() { return new Date(Date.now() + 480 * 60000).toISOString().slice(0, 19); } // 台北時間
+  var CASE_H = {
+    caseList: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var mine = [], todo = [];
+      CASES.forEach(function (c) { var r = caseRole(c, s); if (r === 'receiver') todo.push(caseSum(c, r)); else if (r) mine.push(caseSum(c, r)); });
+      return { mine: mine.reverse(), todo: todo.reverse(), canNotice: s.role === 'manager' || s.role === 'admin', gm: 'Andy' };
+    },
+    caseGet: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var c = CASES.filter(function (x) { return x.id === d.id; })[0], role = c && caseRole(c, s);
+      if (!role) return fail('找不到這個案件');
+      var v = caseSum(c, role);
+      v.to = c.to; v.data = c.data; v.decision = c.decision || '';
+      v.history = c.history.filter(function (h) { return role === 'receiver' || h.act !== 'memo'; });
+      var dec = c.history.filter(function (h) { return h.act === 'decide'; })[0];
+      v.canAppeal = role === 'applicant' && c.kind === 'complaint' && c.status === 'decided' && !!dec;
+      v.appealUntil = dec ? new Date(Date.parse(dec.t.slice(0, 10)) + 30 * 86400000).toISOString().slice(0, 10) : '';
+      return v;
+    },
+    caseSubmit: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var kind = d.kind === 'notice' ? 'notice' : 'complaint', to = d.to === 'gm' ? 'gm' : 'hr';
+      if (receiverEn(to).toLowerCase() === s.en.toLowerCase()) return fail('受理人不能是自己，請改選另一位');
+      var prefix = kind === 'notice' ? 'KN' : d.data.type === 'harass' ? 'SH' : 'BL';
+      var n = CASES.filter(function (c) { return c.no.indexOf(prefix) === 0; }).length + 1;
+      CASES.push({ id: 'case' + (++caseSeq), no: prefix + '-' + today().slice(0, 4) + '-' + ('0' + n).slice(-2) + '（測試）', kind: kind, en: s.en, to: to,
+        data: JSON.parse(JSON.stringify(d.data || {})), status: 'submitted', history: [{ t: stamp(), who: s.en, act: 'submit', note: '' }], createdAt: stamp() });
+      saveCases();
+      if (to === 'hr') BM.toast('（測試）正式版會用 LINE 通知 HR：有一件新的' + (kind === 'notice' ? '通報' : '申訴'));
+      return CASE_H.caseList(d);
+    },
+    caseAct: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var c = CASES.filter(function (x) { return x.id === d.id; })[0], role = c && caseRole(c, s);
+      if (!role) return fail('找不到這個案件');
+      var next = { accept: 'accepted', reject: 'rejected', decide: 'decided', appeal: 'appealed', appealDecide: 'closed', receive: 'received', close: 'closed' }[d.act];
+      if (next) c.status = next;
+      if (d.act === 'decide' || d.act === 'reject') c.decision = d.note;
+      if (d.act === 'appealDecide') c.decision += '\n\n【申復結果】' + d.note;
+      c.history.push({ t: stamp(), who: s.en, act: d.act, note: d.note || '' });
+      saveCases();
+      return CASE_H.caseGet(d);
+    },
+    caseUpload: function (d) { var id = 'cf' + (++caseSeq); CASE_FILES[id] = { name: d.name, mime: d.mimeType, base64: d.base64 }; return { id: id, name: d.name, mime: d.mimeType }; },
+    caseFile: function (d) { return CASE_FILES[d.fileId] || fail('測試附件只在上傳的那個分頁看得到'); }
+  };
+
   var H = {
     login: function (d) {
       var s = staffByEn(d.account);
@@ -147,8 +232,8 @@
       var s = userFrom(d.token);
       if (!s) return authFail();
       var me = meView(s);
-      var M = { events: ['醫學會', '🏥', true], repair: ['設備維修', '🔧'], training: ['教育訓練', '🎓'], attendance: ['出勤紀錄', '⏰', true],
-        apply: ['申請與通報', '📝'], assets: ['辦公設備管理', '🖨️'], news: ['公告', '📢', true], rules: ['規章', '📘', true] };
+      var M = { events: ['醫學會', '🏥', true], repair: ['設備維修', '🔧'], training: ['教育訓練', '🎓'], attendance: ['出勤管理', '⏰', true],
+        apply: ['申請與通報', '📝', true], assets: ['辦公設備管理', '🖨️'], news: ['公告', '📢', true], rules: ['規章', '📘', true] };
       var groups = [['業務事項', ['events', 'repair', 'training']], ['行政事項', ['attendance', 'apply', 'assets']], ['公司資訊', ['news', 'rules']]];
       var canEv = me.pages.events || me.pages.records || me.pages.corrections;
       var menu = groups.map(function (g) {
@@ -163,9 +248,11 @@
       var ah = attMock().home(d.token);
       var todos = ah.todos.slice();
       var news = NEWS.filter(function (n) { return n.status === 'published'; }).slice(0, 3).map(function (n) {
-        return { kind: 'news', id: n.id, title: n.title, date: n.publishedAt.slice(0, 10), pinned: n.pinned };
+        return { kind: 'news', id: n.id, title: n.title, date: n.publishedAt.slice(0, 10), pinned: n.pinned, unread: !READS[s.en + ':news:' + n.id] };
       });
-      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt, todos: todos, review: ah.review, mine: ah.mine, news: news } };
+      var review = ah.review.concat(CASES.filter(function (c) { return caseRole(c, s) === 'receiver' && ['submitted', 'accepted', 'appealed', 'received'].indexOf(c.status) >= 0; })
+        .map(function (c) { return { kind: 'case', id: c.id, title: caseTitle(c) }; }));
+      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt, todos: todos, review: review, mine: ah.mine, news: news } };
     },
     // 歷年活動：用正式活動資料
     eventHistory: function (d) {
@@ -177,7 +264,31 @@
       return { year: y, years: ys, list: done.filter(function (e) { return e.dates[0].slice(0, 4) === y; }).map(function (e) { return { name: e.name, dates: e.dates, host: e.host }; }) };
     },
     // 公告：測試的公告只存在這個分頁（不會推播）
-    newsList: function (d) { var s = userFrom(d.token); if (!s) return authFail(); return NEWS.filter(function (n) { return n.status === 'published'; }); },
+    newsList: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      return NEWS.filter(function (n) { return n.status === 'published'; }).map(function (n) { var v = JSON.parse(JSON.stringify(n)); v.read = !!READS[s.en + ':news:' + n.id]; return v; });
+    },
+    newsRead: function (d) { var s = userFrom(d.token); if (!s) return authFail(); READS[s.en + ':' + (d.kind === 'rule' ? 'rule' : 'news') + ':' + d.id] = 1; saveCases(); return { ok: true }; },
+    // 已結束活動的「修改紀錄」：和正式版一樣直接生效
+    editRecord: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var ev = DATA.events.filter(function (e) { return e.id === d.eventId; })[0];
+      if (!ev) return fail('活動不存在');
+      if (!(ev.dates[ev.dates.length - 1] < today())) return fail('活動結束後才能修改紀錄');
+      var want = {};
+      (d.sessions || []).forEach(function (x) { if (ev.dates.indexOf(x.date) >= 0) want[x.date + '|' + x.session] = true; });
+      ev.dates.forEach(function (dt) {
+        ['AM', 'PM'].forEach(function (ss) {
+          var had = ev.registrants.some(function (r) { return r.en === s.en && r.date === dt && r.session === ss; });
+          var on = !!want[dt + '|' + ss];
+          if (had === on) return;
+          ev.registrants = ev.registrants.filter(function (r) { return !(r.en === s.en && r.date === dt && r.session === ss); });
+          if (on) ev.registrants.push({ en: s.en, date: dt, session: ss });
+          OPS.push({ en: s.en, ev: ev, date: dt, session: ss, on: on });
+        });
+      });
+      return eventsFor(s);
+    },
     newsFile: function () { return fail('測試模式沒有附件'); },
     // 規章：內容讀正式後端（管理員權限），只讀
     rulesList: function () { return BM.realApi('rulesList', { token: ADMIN }); },
@@ -287,6 +398,7 @@
       }
     });
     Object.keys(AM.handlers).forEach(function (k) { H[k] = AM.handlers[k]; });
+    Object.keys(CASE_H).forEach(function (k) { H[k] = CASE_H[k]; });
     fillSwitcher();
     return AM;
   }

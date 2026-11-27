@@ -1,10 +1,10 @@
-/* 功能：出勤紀錄（出勤明細、申請、工作日曆）。打卡在首頁。由 shell.js 掛到內容區。 */
+/* 功能：出勤管理（出勤明細＋補登、休假申請、出勤設定）。打卡在首頁。由 shell.js 掛到內容區。 */
 (function () {
   var $ = function (s, root) { return (root || document).querySelector(s); };
   var $$ = function (s, root) { return Array.prototype.slice.call((root || document).querySelectorAll(s)); };
   var esc = BM.esc;
-  var S = { me: null, tab: 'detail', ym: '', who: '', sort: { key: 'date', dir: -1 }, applyType: 'fix', prefill: null, edit: null, calYm: '' };
-  var TABS = [['detail', '出勤明細'], ['apply', '申請'], ['settings', '出勤設定']];
+  var S = { me: null, tab: 'detail', ym: '', who: '', sort: { key: 'date', dir: -1 }, applyType: 'leave', prefill: null, edit: null, calYm: '' };
+  var TABS = [['detail', '出勤明細'], ['apply', '休假申請'], ['settings', '出勤設定']];
   var STATUS = { pending: ['審核中', 'warn'], approved: ['已核准', ''], rejected: ['已退件', 'bad'], cancelled: ['已取消', 'gray'] };
   var ACT = { submit: '送出', resubmit: '修改後重新送出', edit: '修改', cancel: '取消', cancelReq: '申請取消', withdraw: '撤回修改',
     approve: '核准', reject: '退件', skip: '跳過' };
@@ -22,8 +22,9 @@
   function mount(root, me, tab) {
     S.me = me;
     // 舊網址：打卡、出勤紀錄、補登、請假、加班
-    var alias = { punch: 'detail', records: 'detail', team: 'detail', fix: 'apply', leave: 'apply', ot: 'apply', calendar: 'settings' };
-    if (alias[tab]) { if (tab === 'leave' || tab === 'ot' || tab === 'fix') S.applyType = tab; tab = alias[tab]; }
+    var alias = { punch: 'detail', records: 'detail', team: 'detail', fix: 'detail', leave: 'apply', ot: 'apply', calendar: 'settings' };
+    if (alias[tab]) { if (tab === 'leave' || tab === 'ot') S.applyType = tab; tab = alias[tab]; }
+    if (S.applyType === 'fix') S.applyType = 'leave';
     var tabs = TABS.filter(function (t) { return t[0] !== 'settings' || isHR(); });
     var t = tabs.some(function (x) { return x[0] === tab; }) ? tab : 'detail';
     S.tab = t;
@@ -89,13 +90,13 @@
     var k = key('m_' + (S.who || 'me') + '_' + S.ym);
     var draw = function (m) {
       if (!alive() || S.tab !== 'detail') return;
-      var thisMonth = S.ym >= BM.today().slice(0, 7);
       var people = m.people || [];
-      var bar = '<div class="att-month-bar"><button class="btn small ghost" id="mPrev" aria-label="上個月">‹</button><b>' + S.ym.replace('-', ' 年 ') + ' 月</b>' +
-        '<button class="btn small ghost" id="mNext" aria-label="下個月"' + (thisMonth ? ' disabled' : '') + '>›</button>' +
+      var mineView = !S.who || S.who === myId(people);
+      var bar = '<div class="att-month-bar">' + ymSelects('m', S.ym) +
         (people.length ? '<select class="input mini att-who" id="mWho"><option value="all"' + (S.who === 'all' ? ' selected' : '') + '>全部</option>' +
           people.map(function (p) { return '<option value="' + esc(p.id) + '"' + ((S.who || myId(people)) === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select>' : '') +
-        '<span class="grow"></span>' + (m.canExport || people.length ? '<button class="btn small" id="mXlsx">匯出 Excel</button>' : '') + '</div>';
+        '<span class="grow"></span>' + (mineView ? '<button class="btn small ghost" id="mFixLog">補登紀錄</button>' : '') +
+        (m.canExport || people.length ? '<button class="btn small" id="mXlsx">匯出 Excel</button>' : '') + '</div>';
       if (S.who === 'all') body.innerHTML = bar + allTable(m);
       else {
         var s = m.summary;
@@ -103,12 +104,12 @@
         body.innerHTML = bar + '<div class="att-sum">' + sumCell('出勤天數', s.present) + sumCell('正常', s.ok) + sumCell('異常', s.abnormal, s.abnormal) + sumCell('補登', s.fix) + '</div>' +
           (m.days.length ? '<div class="card att-days">' + m.days.map(function (d) { return dayRow(d, m.detail, mine); }).join('') + '</div>' : '<div class="card empty">沒有資料</div>');
       }
-      $('#mPrev').onclick = function () { S.ym = shiftYm(S.ym, -1); renderDetail(body); };
-      $('#mNext').onclick = function () { S.ym = shiftYm(S.ym, 1); renderDetail(body); };
+      bindYm('m', function (ym) { S.ym = ym; renderDetail(body); });
       if ($('#mWho')) $('#mWho').onchange = function () { S.who = this.value === myId(people) ? '' : this.value; renderDetail(body); };
-      if ($('#mXlsx')) $('#mXlsx').onclick = function () { exportXlsx(m); };
+      if ($('#mXlsx')) $('#mXlsx').onclick = function () { openExport(m); };
+      if ($('#mFixLog')) $('#mFixLog').onclick = openFixLog;
       $$('[data-fix]', body).forEach(function (b) {
-        b.onclick = function () { S.prefill = JSON.parse(b.dataset.fix); S.applyType = 'fix'; S.edit = null; BM.go('attendance/apply'); };
+        b.onclick = function () { openFix(JSON.parse(b.dataset.fix), null, function () { renderDetail(body); }); };
       });
       $$('[data-sort]', body).forEach(function (th) {
         th.onclick = function () {
@@ -142,7 +143,7 @@
     var off = !d.workday;
     var act = '';
     if (mine && d.status === 'abnormal') {
-      act = d.pendingFix ? '<button class="btn small" disabled>補登申請中</button>' :
+      act = d.pendingFix ? '<span class="badge warn">補登審核中</span>' :
         '<button class="btn small" data-fix="' + esc(JSON.stringify(fixPrefill(d))) + '">申請補登</button>';
     }
     return '<div class="att-day' + (off ? ' off' : '') + '">' +
@@ -174,15 +175,110 @@
     if (!d.workday && !d.inTime && !d.outTime) return d.holiday || '休假日';
     return (ST_LABEL[d.status] || [''])[0] + (d.reasons && d.reasons.length && d.status !== 'ok' ? '：' + d.reasons.join('、') : '');
   }
-  function exportXlsx(m) {
-    var head = ['日期', '星期', '姓名', '上班', '下班', '狀態'];
-    var rows;
-    if (S.who === 'all') {
-      rows = m.rows.map(function (r) { return [r.date, wd(r.date), r.staff, r.inTime + (r.inFix ? '（補登）' : ''), r.outTime + (r.outFix ? '（補登）' : ''), stText(r)]; });
-    } else {
-      rows = m.days.slice().reverse().map(function (d) { return [d.date, wd(d.date), m.staff, d.inTime + (d.inFix ? '（補登）' : ''), d.outTime + (d.outFix ? '（補登）' : ''), stText(d)]; });
-    }
-    BM.xlsx('出勤明細_' + S.ym + (S.who === 'all' ? '_全部' : '_' + m.staff.split(' ').pop()) + '.xlsx', [{ name: S.ym, rows: [head].concat(rows) }]);
+  // 年、月分開的下拉選單（月份只到這個月）
+  function ymSelects(p, ym, allYear) {
+    var now = BM.today().slice(0, 7), y0 = Number(now.slice(0, 4)), y = ym.slice(0, 4), mo = ym.slice(5, 7);
+    var years = [y0, y0 - 1, y0 - 2];
+    var maxM = y === now.slice(0, 4) ? Number(now.slice(5, 7)) : 12;
+    var months = [];
+    for (var i = maxM; i >= 1; i--) months.push(('0' + i).slice(-2));
+    return '<select class="input mini" id="' + p + 'Y">' + years.map(function (v) { return '<option value="' + v + '"' + (String(v) === y ? ' selected' : '') + '>' + v + ' 年</option>'; }).join('') + '</select>' +
+      '<select class="input mini" id="' + p + 'M">' + (allYear ? '<option value="all"' + (mo === 'al' ? ' selected' : '') + '>全年</option>' : '') +
+      months.map(function (v) { return '<option value="' + v + '"' + (v === mo ? ' selected' : '') + '>' + Number(v) + ' 月</option>'; }).join('') + '</select>';
+  }
+  function bindYm(p, cb, root) {
+    var ys = $('#' + p + 'Y', root), ms = $('#' + p + 'M', root);
+    var fire = function (changedYear) {
+      var y = ys.value, now = BM.today().slice(0, 7), m = ms.value;
+      if (m !== 'all' && y === now.slice(0, 4) && y + '-' + m > now) m = now.slice(5, 7);
+      cb(m === 'all' ? y + '-all' : y + '-' + m, changedYear);
+    };
+    ys.onchange = function () { fire(true); };
+    ms.onchange = function () { fire(false); };
+  }
+  // 匯出 Excel：先選年、月（可選全年）和人員
+  function openExport(m) {
+    var people = m.people || [];
+    var canAll = !!people.length;
+    var ym = S.ym, who = canAll && S.who === 'all' ? 'all' : (S.who || 'me');
+    var draw = function () {
+      $('#xYm', mm.el).innerHTML = ymSelects('x', ym, true);
+      bindYm('x', function (v) { ym = v; draw(); }, mm.el);
+    };
+    var mm = BM.modal('<h2>匯出 Excel</h2><div class="bar-row" id="xYm"></div>' +
+      (canAll ? '<label class="f" for="xWho">人員</label><select class="input" id="xWho"><option value="all">全部</option>' +
+        people.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === (S.who || myId(people)) ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select>' : '') +
+      '<div class="btn-row"><button class="btn block" id="xGo">匯出</button></div>');
+    if (canAll && who === 'all') $('#xWho', mm.el).value = 'all';
+    draw();
+    $('#xGo', mm.el).onclick = async function () {
+      var sel = canAll ? $('#xWho', mm.el).value : '';
+      var staffId = sel === 'all' ? 'all' : (sel && sel !== myId(people) ? sel : '');
+      var y = ym.slice(0, 4), now = BM.today().slice(0, 7);
+      var months = [];
+      if (ym.slice(5) === 'all') { for (var i = 1; i <= 12; i++) { var k = y + '-' + ('0' + i).slice(-2); if (k <= now) months.push(k); } }
+      else months.push(ym);
+      var head = ['日期', '星期', '姓名', '上班', '下班', '狀態'], rows = [], name = '';
+      for (var j = 0; j < months.length; j++) {
+        var r = await api('attMonth', { ym: months[j], staffId: staffId });
+        if (staffId === 'all') r.rows.slice().sort(function (a, b) { return a.date.localeCompare(b.date) || a.staff.localeCompare(b.staff); }).forEach(function (x) {
+          rows.push([x.date, wd(x.date), x.staff, x.inTime + (x.inFix ? '（補登）' : ''), x.outTime + (x.outFix ? '（補登）' : ''), stText(x)]);
+        });
+        else { name = r.staff; r.days.slice().reverse().forEach(function (d) { rows.push([d.date, wd(d.date), r.staff, d.inTime + (d.inFix ? '（補登）' : ''), d.outTime + (d.outFix ? '（補登）' : ''), stText(d)]); }); }
+      }
+      var label = ym.slice(5) === 'all' ? y : ym;
+      BM.xlsx('出勤明細_' + label + (staffId === 'all' ? '_全部' : '_' + String(name).split(' ').pop()) + '.xlsx', [{ name: label, rows: [head].concat(rows) }]);
+      mm.close();
+    };
+  }
+
+  // ======================= 補登（從出勤明細的異常那一天） =======================
+  function fixParts(x) {
+    var o = { date: x.date, inTime: x.inTime || (x.kind === 'in' ? x.time : ''), outTime: x.outTime || (x.kind === 'out' ? x.time : ''), reason: x.reason || '' };
+    o.useIn = !!o.inTime; o.useOut = !!o.outTime; return o;
+  }
+  // d：{ date, inTime, outTime, useIn, useOut, reason }；edit：要修改的補登單
+  function openFix(d, edit, after) {
+    var m = BM.modal('<h2>申請補登・' + md(d.date) + '（' + wd(d.date) + '）</h2>' +
+      punchRow('In', '上班', d.useIn, d.inTime) + punchRow('Out', '下班', d.useOut, d.outTime) +
+      '<label class="f" for="fxReason">原因</label><input class="input" id="fxReason" maxlength="200" value="' + esc(d.reason || '') + '">' +
+      '<div class="btn-row"><button class="btn block" id="fxOk">送出</button></div>');
+    var el = m.el;
+    ['In', 'Out'].forEach(function (k) {
+      var c = $('#fxUse' + k, el), t = $('#fxTime' + k, el);
+      c.onchange = function () { c.parentElement.classList.toggle('on', c.checked); t.disabled = !c.checked; if (c.checked) t.focus(); };
+    });
+    $('#fxOk', el).onclick = async function () {
+      var data = { date: d.date, inTime: $('#fxUseIn', el).checked ? $('#fxTimeIn', el).value : '', outTime: $('#fxUseOut', el).checked ? $('#fxTimeOut', el).value : '', reason: $('#fxReason', el).value.trim() };
+      if (!data.inTime && !data.outTime) return BM.toast('請勾選上班或下班並填寫時間', true);
+      if (!data.reason) return BM.toast('請填寫原因', true);
+      var res = await api('attSaveFix', { id: edit ? edit.id : '', data: data });
+      BM.toast(res.status === 'approved' ? '已送出並生效' : '已送出');
+      ['reqs', 'bal'].forEach(function (k) { BM.cache(key(k), null); });
+      BM.cache(key('m_me_' + d.date.slice(0, 7)), null);
+      m.close();
+      if (after) after(res);
+    };
+  }
+  function reqRow(r) {
+    return '<a href="#" class="req-row" data-req="' + esc(r.id) + '"><div class="rh"><b>' + esc(r.title + '・' + r.summary) + '</b>' + statusChip(r) + '</div>' + BM.steps(r.steps, true) + '</a>';
+  }
+  function bindReqRows(box, list, onDone) {
+    $$('[data-req]', box).forEach(function (a) {
+      a.onclick = function (e) { e.preventDefault(); openReq(list.filter(function (r) { return r.id === a.dataset.req; })[0], onDone); };
+    });
+  }
+  // 補登紀錄（出勤明細右上角）
+  function openFixLog() {
+    var m = BM.modal('<h2>補登紀錄</h2><div id="fxLog"><div class="card empty" style="border:0">讀取中…</div></div>', { wide: true });
+    var draw = function (list) {
+      var box = $('#fxLog', m.el);
+      if (!box) return;
+      var fixes = list.filter(function (r) { return r.type === 'fix'; });
+      box.innerHTML = fixes.length ? fixes.map(reqRow).join('') : '<div class="card empty" style="border:0">—</div>';
+      bindReqRows(box, fixes, function () { m.close(); if (alive() && S.tab === 'detail') renderDetail($('#attBody')); });
+    };
+    BM.swr(key('reqs'), function () { return BM.api('attMyReqs', { token: token() }); }, draw);
   }
 
   // ======================= 申請（補登打卡／請假／加班） =======================
@@ -192,7 +288,8 @@
     return '<span class="badge ' + (r.status === 'pending' ? 'warn' : s[1]) + '">' + txt + '</span>';
   }
   function renderApply(body) {
-    var types = [['fix', '補登打卡'], ['leave', '請假'], ['ot', '加班']];
+    var types = [['leave', '請假'], ['ot', '加班']];
+    if (S.applyType === 'fix') S.applyType = 'leave';
     body.innerHTML = '<div class="card att-form">' +
       '<div class="att-types">' + types.map(function (t) { return '<button type="button" data-type="' + t[0] + '" class="' + (S.applyType === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       '<div id="attForm"></div></div>' +
@@ -201,7 +298,6 @@
       b.onclick = function () { S.applyType = b.dataset.type; S.edit = null; S.prefill = null; renderApply(body); };
     });
     var f = $('#attForm', body);
-    if (S.applyType === 'fix') fixForm(f);
     if (S.applyType === 'leave') leaveForm(f);
     if (S.applyType === 'ot') otForm(f);
     loadMine();
@@ -216,28 +312,6 @@
   function editNote() { return S.edit ? '<div class="att-editing">修改：' + esc(S.edit.summary) + ' <button type="button" class="link-btn" id="edCancel">取消修改</button></div>' : ''; }
   function bindEditCancel(el) { if ($('#edCancel', el)) $('#edCancel', el).onclick = function () { S.edit = null; renderApply($('#attBody')); }; }
 
-  function fixForm(el) {
-    var d = S.prefill || (S.edit ? (function (x) {
-      var o = { date: x.date, inTime: x.inTime || (x.kind === 'in' ? x.time : ''), outTime: x.outTime || (x.kind === 'out' ? x.time : ''), reason: x.reason };
-      o.useIn = !!o.inTime; o.useOut = !!o.outTime; return o;
-    })(S.edit.pendingData || S.edit.data) : { date: BM.today(), useIn: false, useOut: false });
-    el.innerHTML = editNote() +
-      '<label class="f" for="fxDate">日期</label><input class="input" id="fxDate" type="date" max="' + BM.today() + '" value="' + esc(d.date || BM.today()) + '" style="max-width:260px">' +
-      punchRow('In', '上班', d.useIn, d.inTime) + punchRow('Out', '下班', d.useOut, d.outTime) +
-      '<label class="f" for="fxReason">原因</label><input class="input" id="fxReason" maxlength="200" value="' + esc(d.reason || '') + '">' +
-      '<div class="btn-row" style="justify-content:flex-end"><button class="btn" id="fxOk">送出</button></div>';
-    bindEditCancel(el);
-    ['In', 'Out'].forEach(function (k) {
-      var c = $('#fxUse' + k, el), t = $('#fxTime' + k, el);
-      c.onchange = function () { t.disabled = !c.checked; if (c.checked) t.focus(); };
-    });
-    $('#fxOk', el).onclick = async function () {
-      var data = { date: $('#fxDate', el).value, inTime: $('#fxUseIn', el).checked ? $('#fxTimeIn', el).value : '', outTime: $('#fxUseOut', el).checked ? $('#fxTimeOut', el).value : '', reason: $('#fxReason', el).value.trim() };
-      if (!data.inTime && !data.outTime) return BM.toast('請勾選上班或下班並填寫時間', true);
-      if (!data.reason) return BM.toast('請填寫原因', true);
-      afterSave(await api('attSaveFix', { id: S.edit ? S.edit.id : '', data: data }));
-    };
-  }
   function punchRow(k, label, on, time) {
     return '<div class="att-prow"><label class="chk' + (on ? ' on' : '') + '"><input type="checkbox" id="fxUse' + k + '"' + (on ? ' checked' : '') + '>' + label + '</label>' +
       '<input class="input" id="fxTime' + k + '" type="time" value="' + esc(time || '') + '"' + (on ? '' : ' disabled') + '></div>';
@@ -381,14 +455,18 @@
     var draw = function (list) {
       var box = $('#attMine');
       if (!box) return;
-      box.innerHTML = list.length ? '<div class="card">' + list.slice(0, 50).map(function (r) {
-        return '<a href="#" class="att-req-row" data-req="' + esc(r.id) + '"><span class="grow">' + esc(r.title) + '・' + esc(r.summary) + '</span>' + statusChip(r) + '</a>';
-      }).join('') + '</div>' : '<div class="card empty">—</div>';
-      $$('[data-req]', box).forEach(function (a) {
-        a.onclick = function (e) { e.preventDefault(); openReq(list.filter(function (r) { return r.id === a.dataset.req; })[0]); };
-      });
+      var mine = list.filter(function (r) { return r.type !== 'fix'; }).slice(0, 50);
+      box.innerHTML = mine.length ? '<div class="card">' + mine.map(reqRow).join('') + '</div>' : '<div class="card empty">—</div>';
+      bindReqRows(box, mine);
     };
     BM.swr(key('reqs'), function () { return BM.api('attMyReqs', { token: token() }); }, draw);
+  }
+  // 簽核／退件時寫的備註（流程圖下面）
+  function notesHtml(r) {
+    var n = (r.history || []).filter(function (h) { return (h.act === 'approve' || h.act === 'reject') && /[：:]/.test(h.note || ''); });
+    return n.length ? '<div class="att-hist">' + n.map(function (h) {
+      return '<div><span class="muted">' + esc(String(h.t).slice(5, 10).replace('-', '/')) + '</span> ' + esc(h.by) + '：' + esc(String(h.note).replace(/^[^：:]*[：:]/, '')) + '</div>';
+    }).join('') + '</div>' : '';
   }
   function historyHtml(r) {
     return '<div class="att-hist">' + (r.history || []).map(function (h) {
@@ -407,7 +485,7 @@
       (((r.pendingData || r.data || {}).files || []).length ? '<label class="f">附件</label><div class="att-thumbs" id="rqFiles">' + (r.pendingData || r.data).files.map(function (f) {
         return '<button type="button" class="att-th' + (/^image\//.test(f.mime) ? ' img' : ' pdf') + '" data-fid="' + esc(f.id) + '">' + (/^image\//.test(f.mime) ? '' : 'PDF') + '<small>' + esc(f.name) + '</small></button>';
       }).join('') + '</div>' : '') +
-      historyHtml(r) +
+      BM.steps(r.steps) + notesHtml(r) +
       (r.canDecide ? '<label class="f" for="rqNote">備註</label><input class="input" id="rqNote" maxlength="200">' +
         '<div class="btn-row"><button class="btn danger" id="rqNo">退件</button><button class="btn" id="rqOk">核准</button></div>' :
         (canEdit || canCancel ? '<div class="btn-row">' + (canCancel ? '<button class="btn ghost" id="rqCancel">' + (r.mode === 'edit' ? '撤回修改' : '取消申請') + '</button>' : '') +
@@ -428,7 +506,12 @@
       bt.onclick = function () { load().then(function (u) { window.open(u, '_blank', 'noopener'); }).catch(function (e) { BM.toast(e.message, true); }); };
     });
     var done = function () { BM.cache(key('reqs'), null); BM.cache(key('bal'), null); m.close(); if (onDone) onDone(); else if (S.tab === 'apply' && alive()) renderApply($('#attBody')); };
-    if ($('#rqEdit', el)) $('#rqEdit', el).onclick = function () { m.close(); S.edit = r; S.applyType = r.type; S.prefill = null; if (S.tab === 'apply' && alive()) renderApply($('#attBody')); else BM.go('attendance/apply'); };
+    if ($('#rqEdit', el)) $('#rqEdit', el).onclick = function () {
+      m.close();
+      if (r.type === 'fix') return openFix(fixParts(r.pendingData || r.data), r, function () { if (onDone) onDone(); else if (alive() && S.tab === 'detail') renderDetail($('#attBody')); });
+      S.edit = r; S.applyType = r.type; S.prefill = null;
+      if (S.tab === 'apply' && alive()) renderApply($('#attBody')); else BM.go('attendance/apply');
+    };
     if ($('#rqCancel', el)) $('#rqCancel', el).onclick = async function () {
       if (!await BM.ask(r.mode === 'edit' ? '撤回這次修改？' : '取消這張申請？')) return;
       await api('attCancel', { id: r.id }); BM.toast('已送出'); done();
@@ -458,7 +541,60 @@
     if (S.setSeg === 'quota') return renderQuota($('#setBody', body));
     return renderCalendar($('#setBody', body));
   }
-  async function renderQuota(el) {
+  // 假別額度：依人員（一個人的所有假）或依假別（一種假的所有人）
+  function renderQuota(el) {
+    S.qMode = S.qMode || 'person';
+    el.innerHTML = '<div class="seg-tabs"><button type="button" data-qm="person" class="' + (S.qMode === 'person' ? 'on' : '') + '">依人員</button>' +
+      '<button type="button" data-qm="type" class="' + (S.qMode === 'type' ? 'on' : '') + '">依假別</button></div><div id="qBody"></div>';
+    $$('[data-qm]', el).forEach(function (b) { b.onclick = function () { S.qMode = b.dataset.qm; renderQuota(el); }; });
+    return S.qMode === 'type' ? renderQuotaByType($('#qBody', el)) : renderQuotaByPerson($('#qBody', el));
+  }
+  var hrsOf = function (min) { return min ? String(Math.round(min / 6) / 10) : ''; };
+  function quotaText(x) {
+    if (x.key === 'funeral') return '依親屬 8／6／3 天';
+    if (x.total === null) return '—';
+    return (x.unit === 'month' ? '每月 ' : '') + ATT.fmtDays(x.total) + (x.key === 'family' ? '（併入事假）' : '') + (x.unit === 'event' ? '（每次）' : '');
+  }
+  async function renderQuotaByType(el) {
+    el.innerHTML = '<div class="card empty">讀取中…</div>';
+    S.qYear = S.qYear || BM.today().slice(0, 4);
+    S.qType = S.qType || 'annual';
+    var y0 = Number(BM.today().slice(0, 4));
+    var r = await api('attBalancesAll', { year: S.qYear });
+    if (!alive() || !el.isConnected) return;
+    var types = r.types.filter(function (t) { return ['funeral', 'injury', 'official'].indexOf(t.key) < 0; });
+    el.innerHTML = '<div class="bar-row"><select class="input" id="qtType" style="max-width:220px">' + types.map(function (t) {
+      return '<option value="' + t.key + '"' + (t.key === S.qType ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+    }).join('') + '</select><select class="input" id="qtYear" style="max-width:130px">' + [y0 + 1, y0, y0 - 1].map(function (y) {
+      return '<option value="' + y + '"' + (String(y) === S.qYear ? ' selected' : '') + '>' + y + ' 年</option>';
+    }).join('') + '</select></div>';
+    var rows = r.people.map(function (p) {
+      var x = p.balances.filter(function (b) { return b.key === S.qType; })[0];
+      return { p: p, x: x };
+    });
+    el.innerHTML += '<div class="card" style="padding:0;overflow:auto"><table class="grid q-t"><thead><tr><th>人員</th><th>到職日</th><th>額度</th><th>已用</th><th>剩餘</th><th>手動調整（小時）</th></tr></thead><tbody>' +
+      rows.map(function (o) {
+        var p = o.p, x = o.x;
+        if (!x) return '<tr class="na"><td>' + esc(p.staff) + '</td><td>' + esc((p.hireDate || '').replace(/-/g, '/')) + '</td><td colspan="4">—</td></tr>';
+        var input = '<input class="input q-in" type="number" step="0.5" data-sid="' + esc(p.staffId) + '" data-old="' + hrsOf(x.adjust) + '" value="' + hrsOf(x.adjust) + '">';
+        if (x.closed) return '<tr class="na"><td>' + esc(p.staff) + '</td><td>' + esc((p.hireDate || '').replace(/-/g, '/')) + '</td><td colspan="3">第一次申請時開啟（' + ATT.fmtDays(x.legal * 480) + '）</td><td>' + input + '</td></tr>';
+        return '<tr><td>' + esc(p.staff) + '</td><td>' + esc((p.hireDate || '').replace(/-/g, '/')) + '</td><td>' + esc(quotaText(x)) + '</td><td>' + (x.unit === 'month' ? '本月 ' : '') + esc(ATT.fmtDays(x.used)) + '</td>' +
+          '<td><b>' + (x.remaining === null ? '—' : esc(ATT.fmtDays(x.remaining))) + '</b></td><td>' + input + '</td></tr>';
+      }).join('') + '</tbody></table></div><div class="btn-row" style="justify-content:flex-end"><button class="btn" id="qtSave">儲存</button></div>';
+    $('#qtType', el).onchange = function () { S.qType = this.value; renderQuotaByType(el); };
+    $('#qtYear', el).onchange = function () { S.qYear = this.value; renderQuotaByType(el); };
+    $('#qtSave', el).onclick = async function () {
+      var changed = $$('[data-sid]', el).filter(function (i) { return String(i.value) !== String(i.dataset.old); });
+      if (!changed.length) return BM.toast('沒有變更');
+      for (var i = 0; i < changed.length; i++) {
+        var adj = {}; adj[S.qType] = Math.round((Number(changed[i].value) || 0) * 60);
+        await api('attAdjust', { staffId: changed[i].dataset.sid, year: S.qYear, adj: adj });
+      }
+      BM.toast('已儲存 ' + changed.length + ' 人');
+      renderQuotaByType(el);
+    };
+  }
+  async function renderQuotaByPerson(el) {
     el.innerHTML = '<div class="card empty">讀取中…</div>';
     var ym = BM.today().slice(0, 7);
     var m = BM.cached(key('m_me_' + ym)) || await api('attMonth', { ym: ym }, { silent: true });
@@ -472,8 +608,8 @@
     }).join('') + '</select><select class="input" id="qYear" style="max-width:130px">' + [y0 + 1, y0, y0 - 1].map(function (y) {
       return '<option value="' + y + '"' + (String(y) === S.qYear ? ' selected' : '') + '>' + y + ' 年</option>';
     }).join('') + '</select><span class="small muted" id="qInfo"></span></div><div id="qTable"><div class="card empty">讀取中…</div></div>';
-    $('#qWho', el).onchange = function () { S.qWho = this.value; renderQuota(el); };
-    $('#qYear', el).onchange = function () { S.qYear = this.value; renderQuota(el); };
+    $('#qWho', el).onchange = function () { S.qWho = this.value; renderQuotaByPerson(el); };
+    $('#qYear', el).onchange = function () { S.qYear = this.value; renderQuotaByPerson(el); };
     var r = await api('attBalances', { staffId: S.qWho, year: S.qYear });
     if (!$('#qTable', el)) return;
     $('#qInfo', el).textContent = [r.hireDate ? '到職 ' + r.hireDate.replace(/-/g, '/') : '', r.gender === 'F' ? '女' : r.gender === 'M' ? '男' : '', r.aboriginal ? '原住民' : ''].filter(Boolean).join('・');
@@ -495,7 +631,7 @@
       $$('[data-adj]', el).forEach(function (i) { adj[i.dataset.adj] = Math.round((Number(i.value) || 0) * 60); });
       await api('attAdjust', { staffId: S.qWho, year: S.qYear, adj: adj });
       BM.toast('已儲存');
-      renderQuota(el);
+      renderQuotaByPerson(el);
     };
   }
 

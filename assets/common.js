@@ -201,8 +201,8 @@ var BM = (function () {
   }
 
   // ---- 版本與問題回報 ----
-  var VERSION = '2.5.1'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
-  var UPDATED = '2026/11/27';
+  var VERSION = '2.6.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
+  var UPDATED = '2026/11/28';
 
   function footer(pageName, whoFn) {
     var f = document.createElement('footer');
@@ -310,7 +310,16 @@ var BM = (function () {
     draw();
   }
 
+  // 流程圖 O——O——O：每一關上面是日期、下面是「人名＋動作」
+  // steps：[{ date, who, act, state: done|cur|todo|bad, opt }]；mini＝清單裡的小尺寸
+  function steps(list, mini) {
+    return '<div class="steps' + (mini ? ' mini' : '') + '">' + (list || []).map(function (s) {
+      return '<div class="st ' + (s.state || 'todo') + (s.opt ? ' opt' : '') + '"><em>' + esc(s.date || '') + '</em><i></i><b>' + esc((s.who || '') + (s.act || '')) + '</b></div>';
+    }).join('') + '</div>';
+  }
+
   return {
+    steps: steps,
     VERSION: VERSION, UPDATED: UPDATED, footer: footer, cache: cache, cached: cached, clearCache: clearCache, swr: swr,
     recordsTable: recordsTable, yearChips: yearChips, yearSelect: yearSelect, recordsHead: recordsHead, realApi: realApi, mock: null,
     store: store, api: api, fmtDate: fmtDate, fmtRange: fmtRange, today: today, esc: esc, sess: sess,

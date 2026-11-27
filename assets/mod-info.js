@@ -7,10 +7,20 @@
   function api(action, data, opts) { return BM.run(function () { return BM.api(action, Object.assign({ token: token() }, data || {})); }, opts); }
   function ymd(s) { return String(s || '').slice(0, 10).replace(/-/g, '/'); }
 
-  // 已讀紀錄（這台裝置）
+  // 已讀紀錄：存在後端（每個人一份，換裝置也一樣）；這台裝置也記一份，畫面馬上更新
   function readSet() { return BM.store('newsRead') || {}; }
-  function markRead(id) { var r = readSet(); r[id] = 1; BM.store('newsRead', r); }
-  function isRead(id) { return !!readSet()[id]; }
+  function markRead(id, kind) {
+    var r = readSet(); r[(kind || 'news') + ':' + id] = 1; r[id] = 1; BM.store('newsRead', r);
+    BM.api('newsRead', { token: token(), kind: kind || 'news', id: id }).catch(function () { });
+  }
+  function isRead(id, kind) { var r = readSet(); return !!(r[(kind || 'news') + ':' + id] || (!kind && r[id])); }
+  // 排定時間：日期＋整點／半點
+  function whenFields(p, val) {
+    var d = val ? val.slice(0, 10) : '', t = val ? val.slice(11, 16) : '09:00', opts = '';
+    for (var m = 0; m < 24 * 60; m += 30) { var v = ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + m % 60).slice(-2); opts += '<option' + (v === t ? ' selected' : '') + '>' + v + '</option>'; }
+    return '<input class="input" type="date" id="' + p + 'D" min="' + BM.today() + '" value="' + esc(d) + '" style="max-width:170px"><select class="input" id="' + p + 'T" style="max-width:100px">' + opts + '</select>';
+  }
+  function fmtWhen(v) { return v ? v.slice(5, 10).replace('-', '/') + ' ' + v.slice(11, 16) : ''; }
 
   // 從後端讀附件（不公開），回傳可以開啟的網址
   var fileCache = {};
@@ -54,10 +64,13 @@
     var box = $('#nList');
     if (!box) return;
     box.innerHTML = N.list.length ? '<div class="card news-list">' + N.list.map(function (n) {
-      return '<a href="#" class="ann-row" data-n="' + esc(n.id) + '">' +
-        (n.status !== 'published' ? '<span class="tag gray">草稿</span>' : n.pinned ? '<span class="tag pin">置頂</span>' : '<span class="tag">公告</span>') +
-        '<span class="grow">' + esc(n.title) + '</span><span class="d">' + ymd(n.publishedAt || n.createdAt).slice(5) + '</span>' +
-        (n.status === 'published' && !isRead(n.id) ? '<span class="new" aria-label="未讀"></span>' : '<span class="new off"></span>') + '</a>';
+      var unread = n.status === 'published' && !n.read && !isRead(n.id);
+      var when = n.status === 'scheduled' ? '<span class="badge warn">排定 ' + esc(fmtWhen(n.publishAt)) + '</span>' :
+        (n.status === 'published' && n.pushLine && !n.pushedAt && n.pushAt ? '<span class="badge warn">推播 ' + esc(fmtWhen(n.pushAt)) + '</span>' : '');
+      return '<a href="#" class="ann-row' + (unread ? ' unread' : '') + '" data-n="' + esc(n.id) + '">' +
+        (n.status === 'draft' ? '<span class="tag gray">草稿</span>' : n.pinned ? '<span class="tag pin">置頂</span>' : '<span class="tag">公告</span>') +
+        '<span class="grow">' + esc(n.title) + '</span>' + when + '<span class="d">' + (n.status === 'published' ? ymd(n.publishedAt).slice(5) : '') + '</span>' +
+        '<span class="new' + (unread ? '' : ' off') + '"' + (unread ? ' aria-label="未讀"' : '') + '></span></a>';
     }).join('') + '</div>' : '<div class="card empty">—</div>';
     $$('[data-n]', box).forEach(function (a) {
       a.onclick = function (e) { e.preventDefault(); openNews(N.list.filter(function (x) { return x.id === a.dataset.n; })[0]); };
@@ -65,7 +78,7 @@
   }
   function openNews(n) {
     if (!n) return;
-    markRead(n.id);
+    if (n.status === 'published' && !n.read) { markRead(n.id); n.read = true; }
     var m = BM.modal('<h2>' + esc(n.title) + '</h2><div class="small muted">' + ymd(n.publishedAt || n.createdAt) + '</div>' +
       (n.body ? '<div class="news-body">' + BM.linkify(n.body) + '</div>' : '') +
       (n.files.length ? thumbs(n.files) : '') +
@@ -87,12 +100,22 @@
       '<label class="f" for="neB">內容</label><textarea class="input" id="neB" rows="6" maxlength="5000">' + esc(n.body) + '</textarea>' +
       '<label class="f">附件</label><div class="att-files" id="neF"></div>' +
       '<div class="ne-opts"><label class="chk' + (n.pinned ? ' on' : '') + '"><input type="checkbox" id="neP"' + (n.pinned ? ' checked' : '') + '>置頂</label></div>' +
-      (n.status !== 'published' ? '<label class="f">推播</label><div class="ne-opts"><label class="chk on"><input type="checkbox" id="neL" checked>LINE 群組</label>' +
-        '<select class="input" id="neG" style="max-width:150px"><option value="main"' + (target === 'main' ? ' selected' : '') + '>正式群組</option><option value="test"' + (target === 'test' ? ' selected' : '') + '>測試群組</option></select></div>' : '') +
-      '<div class="btn-row">' + (n.status === 'published' ? '<button class="btn ghost" id="neUn">改回草稿</button>' : '<button class="btn ghost" id="neD">存成草稿</button>') +
+      (n.status !== 'published' ? '<label class="f">發布時間</label><div class="ne-opts"><div class="att-seg"><button type="button" data-pm="now" class="' + (n.publishAt ? '' : 'on') + '">立即</button><button type="button" data-pm="at" class="' + (n.publishAt ? 'on' : '') + '">排定</button></div>' +
+        '<span id="neWhen"' + (n.publishAt ? '' : ' hidden') + '>' + whenFields('neP', n.publishAt) + '</span></div>' : '') +
+      (!n.pushedAt ? '<label class="f">LINE 推播</label><div class="ne-opts"><label class="chk' + (n.pushLine !== false ? ' on' : '') + '"><input type="checkbox" id="neL"' + (n.pushLine !== false ? ' checked' : '') + '>推播</label>' +
+        '<select class="input" id="neG" style="max-width:150px"><option value="main"' + ((n.pushTarget || target) === 'main' ? ' selected' : '') + '>正式群組</option><option value="test"' + ((n.pushTarget || target) === 'test' ? ' selected' : '') + '>測試群組</option></select>' +
+        '<div class="att-seg"><button type="button" data-qm="same" class="' + (n.pushAt ? '' : 'on') + '">同發布時間</button><button type="button" data-qm="at" class="' + (n.pushAt ? 'on' : '') + '">另訂</button></div>' +
+        '<span id="nePushWhen"' + (n.pushAt ? '' : ' hidden') + '>' + whenFields('neQ', n.pushAt) + '</span></div>' : '') +
+      '<div class="btn-row">' + (n.status === 'published' || n.status === 'scheduled' ? '<button class="btn ghost" id="neUn">改回草稿</button>' : '<button class="btn ghost" id="neD">存成草稿</button>') +
       '<span class="grow"></span><button class="btn" id="neOk">' + (n.status === 'published' ? '儲存' : '發布') + '</button></div>');
     var el = m.el;
     $$('.chk input', el).forEach(function (i) { i.onchange = function () { i.parentElement.classList.toggle('on', i.checked); }; });
+    var pubMode = n.publishAt ? 'at' : 'now', pushMode = n.pushAt ? 'at' : 'same';
+    var setBtn = function () { if ($('#neOk', el) && n.status !== 'published') $('#neOk', el).textContent = pubMode === 'at' ? '排定發布' : '發布'; };
+    $$('[data-pm]', el).forEach(function (b) { b.onclick = function () { pubMode = b.dataset.pm; $$('[data-pm]', el).forEach(function (x) { x.classList.toggle('on', x === b); }); $('#neWhen', el).hidden = pubMode !== 'at'; setBtn(); }; });
+    $$('[data-qm]', el).forEach(function (b) { b.onclick = function () { pushMode = b.dataset.qm; $$('[data-qm]', el).forEach(function (x) { x.classList.toggle('on', x === b); }); $('#nePushWhen', el).hidden = pushMode !== 'at'; }; });
+    setBtn();
+    var whenOf = function (p) { var d = $('#' + p + 'D', el).value; return d ? d + 'T' + $('#' + p + 'T', el).value : ''; };
     var drawFiles = function () {
       $('#neF', el).innerHTML = files.map(function (f, i) { return '<span class="file-chip">' + esc(f.name) + '<button type="button" data-rm="' + i + '" aria-label="移除">×</button></span>'; }).join('') +
         (files.length < 10 ? '<label class="file-add">＋ 加入檔案或圖片<input type="file" id="nePick" multiple hidden></label>' : '');
@@ -109,19 +132,27 @@
       if (!x.title) return BM.toast('請填寫標題', true);
       var pushLine = publish && $('#neL', el) && $('#neL', el).checked;
       var tgt = $('#neG', el) ? $('#neG', el).value : 'main';
+      var publishAt = publish && n.status !== 'published' && pubMode === 'at' ? whenOf('neP') : '';
+      var pushAt = pushLine && pushMode === 'at' ? whenOf('neQ') : '';
+      var nowMin = BM.today() + 'T' + new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60000).toTimeString().slice(0, 5);
+      if (publish && n.status !== 'published' && pubMode === 'at' && (!publishAt || publishAt <= nowMin)) return BM.toast('請選擇未來的發布時間', true);
+      if (pushLine && pushMode === 'at' && (!pushAt || pushAt <= nowMin)) return BM.toast('請選擇未來的推播時間', true);
+      if (pushAt && publishAt && pushAt < publishAt) return BM.toast('推播時間不能早於發布時間', true);
       if (pushLine) {
         BM.store('newsPushTarget', tgt);
-        if (!await BM.ask('發布並推播到 LINE ' + (tgt === 'main' ? '正式群組' : '測試群組') + '？', { ok: '發布' })) return;
+        var whenTxt = pushAt ? fmtWhen(pushAt) : publishAt ? fmtWhen(publishAt) : '現在';
+        if (!await BM.ask((publishAt ? '排定 ' + fmtWhen(publishAt) + ' 發布' : '發布') + '，' + whenTxt + ' 推播到 LINE ' + (tgt === 'main' ? '正式群組' : '測試群組') + '？', { ok: '確定' })) return;
       }
-      var r = await api('newsSave', { news: x, publish: publish, unpublish: !!unpublish, pushLine: pushLine, pushTarget: tgt });
+      var r = await api('newsSave', { news: x, publish: publish, unpublish: !!unpublish, pushLine: pushLine, pushTarget: tgt, publishAt: publishAt, pushAt: pushAt });
       N.list = r.list; BM.cache('news', N.list);
       if (r.pushed && !r.pushed.ok) BM.notice('已發布，但 LINE 推播沒有送出：' + r.pushed.error);
-      else BM.toast(publish ? '已發布' : '已儲存');
+      else BM.toast(publishAt ? '已排定 ' + fmtWhen(publishAt) + ' 發布' : publish ? '已發布' : '已儲存');
       m.close(); drawNews();
     };
     if ($('#neD', el)) $('#neD', el).onclick = function () { save(false); };
     if ($('#neUn', el)) $('#neUn', el).onclick = function () { save(false, true); };
-    $('#neOk', el).onclick = function () { save(n.status === 'published' ? false : true); };
+    // 已發布的公告按「儲存」：只改內容；如果還沒推播又勾了推播，就照設定推播
+    $('#neOk', el).onclick = function () { save(n.status === 'published' ? !!($('#neL', el) && $('#neL', el).checked) : true); };
   }
   function upload(file) {
     return new Promise(function (resolve, reject) {
@@ -159,17 +190,23 @@
       box.innerHTML = '<div class="doc-meta">' + esc(d.sub) + '<br>' + esc(d.meta) + '</div>' +
         (d.video ? '<div class="video-wrap"><iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(d.video) + '?rel=0" title="' + esc(d.title) + '" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>' : '') +
         (heads.length ? '<nav class="toc">' + heads.map(function (x) { return '<a href="#" data-to="' + x.id + '">' + esc(x.textContent) + '</a>'; }).join('') + '</nav>' : '') +
-        '<div class="card manual">' + d.html + '</div>';
+        '<div class="card manual manual-box" id="manBox">' + d.html + '</div>';
+      if (!isRead(id, 'rule')) markRead(id, 'rule');
+      // 內容在固定範圍內捲動；點目錄就捲到那一章
+      var mb = $('#manBox', box);
       $$('[data-to]', box).forEach(function (a) {
         a.onclick = function (e) {
           e.preventDefault();
           var t = document.getElementById(a.dataset.to);
-          if (t) window.scrollTo({ top: t.getBoundingClientRect().top + window.scrollY - 70, behavior: 'smooth' });
+          if (!t) return;
+          mb.scrollTo({ top: t.getBoundingClientRect().top - mb.getBoundingClientRect().top + mb.scrollTop - 8, behavior: 'smooth' });
+          var r = mb.getBoundingClientRect();
+          if (r.top < 60 || r.top > window.innerHeight - 200) window.scrollTo({ top: r.top + window.scrollY - 70, behavior: 'smooth' });
         };
       });
     });
   }
 
-  BM.modules.news = { mount: mountNews, isRead: isRead };
+  BM.modules.news = { mount: mountNews, isRead: isRead, markRead: markRead };
   BM.modules.rules = { mount: mountRules };
 })();

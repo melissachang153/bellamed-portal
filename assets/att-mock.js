@@ -70,6 +70,7 @@ var ATT_MOCK = function (opts) {
         if (d.staffId) return svc.balancesFor(me(d), String(d.staffId), String(d.year || ''));
         return { balances: svc.balances(me(d), String(d.year || '')), types: svc.leaveTypes() };
       },
+      attBalancesAll: function (d) { return svc.balancesAll(me(d), String(d.year || '')); },
       // 測試附件：只存在這個分頁的記憶體裡
       attUpload: function (d) {
         me(d);

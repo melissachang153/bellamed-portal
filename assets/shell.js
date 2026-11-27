@@ -13,8 +13,8 @@
   // 各功能的子分頁（顯示在左側選單，點功能名稱展開）
   function subsOf(key) {
     var S = {
-      events: [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '報名修正'], ['history', '歷年活動']].concat(isAdmin() ? [['settings', '設定']] : []),
-      attendance: [['detail', '出勤明細'], ['apply', '申請']].concat(isHR() ? [['settings', '出勤設定']] : []),
+      events: [['events', '活動報名'], ['records', '參加紀錄'], ['history', '歷年活動']].concat(isAdmin() ? [['settings', '設定']] : []),
+      attendance: [['detail', '出勤明細'], ['apply', '休假申請']].concat(isHR() ? [['settings', '出勤設定']] : []),
       settings: [['staff', '人員'], ['perm', '選單與權限'], ['line', 'LINE 與推播'], ['fb', '問題回報']]
     };
     return S[key] || [];
@@ -365,10 +365,13 @@
     });
     if (moduleOf('news') && h.news) {
       var N = BM.modules.news;
-      html += '<div class="card home-card home-list home-news"><div class="hc-title">' + icon('news') + '最新公告<a class="small hc-all" href="#/news">全部 ›</a></div>' +
+      // 後端記的未讀，再扣掉這台裝置剛看過的（不用等重新整理）
+      var isUnread = function (n) { return (n.unread !== undefined ? !!n.unread : n.kind === 'news') && !(N && N.isRead(n.id, n.kind === 'rule' ? 'rule' : 'news')); };
+      var unreadN = h.news.filter(isUnread).length;
+      html += '<div class="card home-card home-list home-news"><div class="hc-title">' + icon('news') + '最新公告' + (unreadN ? '<span class="cnt">' + unreadN + '</span>' : '') + '<a class="small hc-all" href="#/news">全部 ›</a></div>' +
         (h.news.length ? h.news.map(function (n) {
-          var unread = n.kind === 'news' && N && !N.isRead(n.id);
-          return '<a class="ann-row" href="#/' + (n.kind === 'rule' ? 'rules/' : 'news/') + esc(n.id) + '">' +
+          var unread = isUnread(n);
+          return '<a class="ann-row' + (unread ? ' unread' : '') + '" href="#/' + (n.kind === 'rule' ? 'rules/' : 'news/') + esc(n.id) + '">' +
             (n.pinned ? '<span class="tag pin">置頂</span>' : '<span class="tag">' + (n.kind === 'rule' ? '規章' : '公告') + '</span>') +
             '<span class="grow">' + esc(n.title) + '</span><span class="d">' + esc(n.date.slice(5).replace('-', '/')) + '</span><span class="new' + (unread ? '' : ' off') + '"></span></a>';
         }).join('') : '<div class="hl-empty">—</div>') + '</div>';
@@ -398,7 +401,9 @@
       a.onclick = function (e) {
         e.preventDefault();
         var r = review[+a.dataset.rev];
-        if (r.kind === 'att') A.openReqById(r.id, refreshHome); else BM.go('review/events');
+        if (r.kind === 'att') A.openReqById(r.id, refreshHome);
+        else if (r.kind === 'case') BM.go('apply/' + r.id);
+        else BM.go('review/events');
       };
     });
     $$('[data-mine]', box).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); A.openReqById(a.dataset.mine, refreshHome); }; });
@@ -467,7 +472,7 @@
       }).join('') + '</div></div>' +
       (moduleOf('attendance') ? '<div class="section-title">假勤餘額</div><div class="card" id="meBal"><div class="muted small">讀取中…</div></div>' : '') +
       '<div class="section-title">我的申請</div><div class="card">' +
-      (moduleOf('attendance') ? '<a class="menu-row" href="#/attendance/apply">' + icon('apply') + '出勤申請</a>' : '') +
+      (moduleOf('attendance') ? '<a class="menu-row" href="#/attendance/apply">' + icon('apply') + '休假申請</a>' : '') +
       (canCor ? '<a class="menu-row" href="#/events/corrections">' + icon('events') + '醫學會修正申請</a>' : '') + '</div>' +
       '<div class="section-title">修改密碼</div><div class="card">' +
       '<label class="f" for="mOld">目前的密碼</label><input class="input" id="mOld" type="password" autocomplete="current-password" maxlength="20">' +

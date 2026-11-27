@@ -295,10 +295,31 @@ var ATT = (function () {
       if (r.type === 'ot') return md(d.date) + ' ' + d.from + '–' + d.to + '（' + fmtDur(d.minutes) + '，' + (d.comp ? '補休' : '加班費') + '）';
       return '';
     }
+    // 流程圖：每一關「日期＋人名＋動作」，例如 11/27 Justine申請 → Melissa簽核 → Andy簽核
+    function stepsOf(r, p) {
+      var hist = r.history || [], start = 0;
+      hist.forEach(function (h, i) { if (['submit', 'resubmit', 'edit', 'cancelReq'].indexOf(h.act) >= 0) start = i; });
+      var day = function (t) { return String(t || '').slice(5, 10).replace('-', '/'); };
+      var h0 = hist[start] || { t: r.createdAt, act: 'submit' };
+      var out = [{ date: day(h0.t), who: p.en, act: h0.act === 'cancelReq' ? '申請取消' : h0.act === 'edit' ? '修改' : '申請', state: 'done' }];
+      hist.slice(start + 1).forEach(function (h) {
+        if (h.act === 'approve') out.push({ date: day(h.t), who: h.by, act: '簽核', state: 'done' });
+        else if (h.act === 'reject') out.push({ date: day(h.t), who: h.by, act: '退件', state: 'bad' });
+        else if (h.act === 'cancel' || h.act === 'withdraw') out.push({ date: day(h.t), who: h.by, act: h.act === 'cancel' ? '取消' : '撤回', state: 'bad' });
+      });
+      if (r.status === 'pending') {
+        for (var i = r.stage; i < (r.stages || []).length; i++) {
+          var id = approverId(r.stages[i], p, env.people());
+          out.push({ date: '', who: id ? en(id) : STAGE_LABEL[r.stages[i]], act: '簽核', state: i === r.stage ? 'cur' : 'todo' });
+        }
+      }
+      return out;
+    }
     function reqView(r, viewer) {
       var p = person(r.staffId) || { id: r.staffId, en: '' };
       var who = currentApprover(r, p, env.people());
       return {
+        steps: stepsOf(r, p),
         id: r.id, type: r.type, typeLabel: TYPE_LABEL[r.type] || r.type, title: title(r), staff: p.en, staffName: fullName(p),
         mine: !!(viewer && viewer.id === r.staffId), data: r.data, pendingData: r.pendingData || null, mode: r.mode || '',
         status: r.status, hrOk: !!r.hrOk, stageLabel: r.status === 'pending' ? STAGE_LABEL[r.stages[r.stage]] : '',
@@ -586,6 +607,14 @@ var ATT = (function () {
         var now = env.now();
         return { staffId: p.id, staff: fullName(p), hireDate: p.hireDate || '', gender: p.gender || '', aboriginal: !!p.aboriginal,
           balances: balances(p, String(year || now.date.slice(0, 4)), '', now.date.slice(0, 7)) };
+      },
+      // HR：所有在職人員的假別額度（出勤設定「依假別」）
+      balancesAll: function (me, year) {
+        if (me.role !== 'admin') throw new Error('沒有權限');
+        var now = env.now(), y = String(year || now.date.slice(0, 4));
+        return { year: y, types: LEAVE_TYPES, people: activePeople().map(function (p) {
+          return { staffId: p.id, staff: fullName(p), hireDate: p.hireDate || '', balances: balances(p, y, '', now.date.slice(0, 7)) };
+        }) };
       },
       saveFix: function (me, id, data) { return saveReq(me, id, 'fix', data); },
       saveLeave: function (me, id, data) { return saveReq(me, id, 'leave', data); },
