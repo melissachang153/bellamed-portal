@@ -180,7 +180,7 @@
       (ICON_PATHS[key] || ICON_PATHS.other) + '</svg>';
   }
   BM.icon = icon;
-  var BOTTOM_ICON = { 'home': 'home', 'attendance/punch': 'attendance', 'attendance/leave': 'leave', 'me': 'me' };
+  var BOTTOM_ICON = { 'home': 'home', 'attendance/detail': 'attendance', 'attendance/apply': 'apply', 'me': 'me' };
   $$('#bottomNav a').forEach(function (a) { var s = a.querySelector('span'); if (s) s.innerHTML = icon(BOTTOM_ICON[a.dataset.r]); });
 
   function drawFrame() {
@@ -242,10 +242,10 @@
     var me = P.me;
     var items = [['me', 'me', '我的']];
     if (isApprover()) items.push(['review', 'review', '待我審核' + (P.home.pending ? '（' + P.home.pending + '）' : '')]);
-    if (isAdmin()) items.push(['admin', 'admin', '管理中心']);
+    if (isAdmin()) items.push(['settings', 'admin', '系統設定']);
     var m = BM.modal('<h2>' + esc(me.name) + (roleLabel(me) ? ' <span class="badge gray">' + roleLabel(me) + '</span>' : '') + '</h2>' +
       '<div class="menu-list">' + items.map(function (i) {
-        return '<button class="menu-row" data-go="' + i[0] + '">' + icon(i[1]) + '' + esc(i[2]) + '</button>';
+        return '<button class="menu-row" data-go="' + i[0] + '">' + icon(i[1]) + esc(i[2]) + '</button>';
       }).join('') +
       (isAdmin() && !TEST ? '<a class="menu-row" href="test.html">' + icon('test') + '測試模式</a>' : '') +
       '<button class="menu-row" id="umOut">' + icon('logout') + '登出</button></div>');
@@ -269,8 +269,9 @@
     window.scrollTo(0, 0);
     if (r === 'home') return renderHome(box);
     if (r === 'me') return renderMe(box);
-    if (parts[0] === 'review' && isApprover()) return parts[1] === 'events' && isAdmin() ? renderAdmin(box, 'events', 'review', '醫學會修正申請') : renderReview(box);
-    if (parts[0] === 'admin' && isAdmin()) return renderAdmin(box, parts[1] || 'events', parts[2]);
+    if (r === 'todo') return renderTodo(box);
+    if (parts[0] === 'review' && isApprover()) return parts[1] === 'events' && isAdmin() ? renderEventsReview(box) : renderReview(box);
+    if ((parts[0] === 'settings' || parts[0] === 'admin') && isAdmin()) return renderSettings(box, parts[0] === 'settings' ? parts[1] : '');
     var mod = moduleOf(parts[0]);
     if (!mod) return BM.go('home');
     if (mod.ready && BM.modules[mod.key]) {
@@ -281,40 +282,48 @@
   }
 
   function renderSoon(box, mod) {
-    box.innerHTML = '<div class="page-head"><h2>' + esc(mod.name) + '</h2></div>' +
-      '<div class="card empty"><div style="font-size:40px">🚧</div><b>即將推出</b>' +
-      '<p class="small muted">這個功能還在規劃中，完成後會在這裡開放。</p>' +
-      '<div class="btn-row" style="justify-content:center"><a class="btn ghost" href="#/home">回首頁</a></div></div>';
+    box.innerHTML = '<div class="page-head"><h2>' + esc(mod.name) + '</h2></div><div class="card empty"><b>即將推出</b></div>';
   }
 
   // ---------------- 首頁 ----------------
+  var ST = { pending: ['審核中', 'warn'], approved: ['已核准', ''], rejected: ['已退件', 'bad'], cancelled: ['已取消', 'gray'] };
+  function chip(r) { var s = ST[r.status] || [r.status, 'gray']; return '<span class="badge ' + s[1] + '">' + s[0] + '</span>'; }
+  // 首頁的清單卡片：標題、件數、全部 ›，每筆只有標題
+  function listCard(title, ico, items, href, row) {
+    return '<div class="card home-card home-list"><div class="hc-title">' + icon(ico) + title +
+      (items.length ? '<span class="cnt">' + items.length + '</span>' : '') + '<a class="small hc-all" href="' + href + '">全部 ›</a></div>' +
+      (items.length ? items.slice(0, 5).map(row).join('') : '<div class="hl-empty">—</div>') + '</div>';
+  }
+  function todoAction(t) {
+    if (t.kind === 'rejected') return BM.modules.attendance.openReqById(t.id, refreshHome);
+    if (t.kind === 'event') { BM.go('events'); setTimeout(function () { BM.modules.events.openEvent(t.id); }, 500); return; }
+    BM.go('attendance/detail');
+  }
   function renderHome(box) {
     var me = P.me, h = P.home || {};
     var hr = new Date().getHours();
     var hi = hr < 11 ? '早安' : hr < 18 ? '午安' : '晚安';
-    var att = moduleOf('attendance');
-    var html = '<div class="hello"><h2>' + hi + '，' + esc(me.name) + '</h2><div class="muted">' + BM.fmtDate(BM.today()) + '</div></div>';
-    html += '<div class="home-grid">';
     var A = BM.modules.attendance;
-    if (att && h.att && A) {
-      html += '<div class="card home-card home-att">' + A.todayCard(h.att, { link: true }) + '</div>';
-    }
-    if (isApprover()) {
-      var parts = [];
-      if (h.pendingAtt) parts.push('<div><span class="big-num">' + h.pendingAtt + '</span> 件出勤申請</div>');
-      if (h.pendingEvents) parts.push('<div><span class="big-num">' + h.pendingEvents + '</span> 件醫學會修正申請</div>');
-      html += '<a class="card home-card" href="#/review"><div class="hc-title">' + icon('review') + '待我審核</div>' +
-        (parts.length ? parts.join('') : '<div class="muted small">目前沒有待審核的申請</div>') + '</a>';
-    }
+    var todos = h.todos || [], review = h.review || [], mine = h.mine || [];
+    var html = '<div class="hello"><h2>' + hi + '，' + esc(me.name) + '</h2></div><div class="home-grid">';
+    if (moduleOf('attendance') && h.att && A) html += '<div class="card home-card home-att">' + A.todayCard(h.att, { link: true }) + '</div>';
+    html += listCard('待辦事項', 'attendance', todos, '#/todo', function (t, i) {
+      return '<a href="#" class="hl-row" data-todo="' + i + '"><span class="dot ' + (t.kind === 'event' ? 'y' : '') + '"></span><span class="grow">' + esc(t.title) + '</span><span class="go">›</span></a>';
+    });
+    if (isApprover()) html += listCard('待我審核', 'review', review, '#/review', function (r, i) {
+      return '<a href="#" class="hl-row" data-rev="' + i + '"><span class="grow">' + esc(r.title) + '</span><span class="go">›</span></a>';
+    });
+    if (moduleOf('attendance')) html += listCard('我的申請', 'apply', mine, '#/attendance/apply', function (r) {
+      return '<a href="#" class="hl-row" data-mine="' + esc(r.id) + '"><span class="grow">' + esc(r.title) + '</span>' + chip(r) + '<span class="go">›</span></a>';
+    });
     html += '</div>';
     if (h.events) {
       html += '<div class="section-title">即將舉行的醫學會</div>' + (h.events.length ? h.events.map(function (e) {
         return '<a class="card list-item home-ev" href="#/events" data-ev="' + e.id + '"><div class="grow"><b>' + esc(e.name) + '</b>' +
           '<div class="small muted">' + esc(BM.fmtRange(e.dates)) + '・已報名 ' + e.peopleCount + ' 人</div></div>' +
           (e.mine ? '<span class="badge">我已報名</span>' : '') + '</a>';
-      }).join('') : '<div class="card empty">目前沒有即將舉行的活動</div>');
+      }).join('') : '<div class="card empty">—</div>');
     }
-    // 手機沒有左側選單：首頁下方列出全部功能（電腦版由左側選單取代，不重複顯示）
     html += '<div class="home-menu">' + P.menu.map(function (g) {
       return '<div class="section-title">' + esc(g.name) + '</div><div class="tiles">' + g.items.map(function (it) {
         return '<a class="tile' + (it.ready ? '' : ' off') + '" href="#/' + it.key + '">' + icon(it.key) +
@@ -322,63 +331,68 @@
       }).join('') + '</div>';
     }).join('') + '</div>';
     box.innerHTML = html;
-    var pb = $('.home-att [data-punch]', box);
-    if (pb) {
-      A.init(me);
-      A.tick();
-      A.bindPunch($('.home-att', box), function (t) { P.home.att = t; BM.cache('portal', P); renderHome(box); });
+    if ($('.home-att [data-punch]', box)) {
+      A.init(me); A.tick();
+      A.bindPunch($('.home-att', box), function (t) { P.home.att = t; BM.cache('portal', P); renderHome(box); refreshHome(); });
     }
+    if (A) A.init(me);
+    $$('[data-todo]', box).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); todoAction(todos[+a.dataset.todo]); }; });
+    $$('[data-rev]', box).forEach(function (a) {
+      a.onclick = function (e) {
+        e.preventDefault();
+        var r = review[+a.dataset.rev];
+        if (r.kind === 'att') A.openReqById(r.id, refreshHome); else BM.go('review/events');
+      };
+    });
+    $$('[data-mine]', box).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); A.openReqById(a.dataset.mine, refreshHome); }; });
     $$('[data-ev]', box).forEach(function (a) {
       a.onclick = function () { setTimeout(function () { BM.modules.events.openEvent(a.dataset.ev); }, 400); };
     });
+  }
+  async function refreshHome() {
+    await refreshPortal();
+    if (currentRoute() === 'home') renderHome($('#content'));
+  }
+
+  // ---------------- 待辦事項（全部） ----------------
+  function renderTodo(box) {
+    var todos = (P.home && P.home.todos) || [];
+    box.innerHTML = '<div class="page-head"><h2>待辦事項</h2></div>' +
+      (todos.length ? '<div class="card">' + todos.map(function (t, i) {
+        return '<a href="#" class="hl-row" data-todo="' + i + '"><span class="dot ' + (t.kind === 'event' ? 'y' : '') + '"></span><span class="grow">' + esc(t.title) + '</span><span class="go">›</span></a>';
+      }).join('') + '</div>' : '<div class="card empty">—</div>');
+    if (BM.modules.attendance) BM.modules.attendance.init(P.me);
+    $$('[data-todo]', box).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); todoAction(todos[+a.dataset.todo]); }; });
   }
 
   // ---------------- 待我審核 ----------------
   function renderReview(box) {
     var A = BM.modules.attendance;
+    A.init(P.me);
     var h = P.home || {};
     box.innerHTML = '<div class="page-head"><h2>待我審核</h2></div><div id="revRoot"><div class="card empty">讀取中…</div></div>';
     var key = 'review_' + String(P.me.name).toLowerCase();
     var draw = function (r) {
       var root = $('#revRoot');
       if (!root) return;
+      var row = function (x) { return '<a href="#" class="hl-row" data-r="' + esc(x.id) + '"><span class="grow">' + esc(x.staff + '・' + x.title) + '</span>' + chip(x) + '<span class="go">›</span></a>'; };
       root.innerHTML =
-        (isAdmin() ? '<a class="card list-item" href="#/review/events"><div class="grow"><b>醫學會修正申請</b><div class="small muted">' +
-          (h.pendingEvents ? h.pendingEvents + ' 件待審核' : '目前沒有待審核的申請') + '</div></div><span class="muted">›</span></a>' : '') +
-        '<div class="section-title">出勤申請（' + r.todo.length + '）</div>' +
-        (r.todo.length ? r.todo.map(function (x) { return A.reqCard(x, { who: true, decide: true }); }).join('') : '<div class="card empty">目前沒有待審核的出勤申請</div>') +
-        (r.done.length ? '<div class="section-title">最近審核過的</div>' + r.done.map(function (x) { return A.reqCard(x, { who: true, decide: true }); }).join('') : '');
-      $$('.att-req', root).forEach(function (el) {
-        var x = r.todo.filter(function (y) { return y.id === el.dataset.id; })[0];
-        if (!x) return;
-        var ok = $('[data-ok]', el), no = $('[data-no]', el);
-        if (ok) ok.onclick = async function () {
-          await BM.run(function () { return BM.api('attDecide', { token: token(), id: x.id, approve: true }); });
-          BM.toast('已核准');
-          refreshAfterReview();
-        };
-        if (no) no.onclick = function () {
-          var m = BM.modal('<h2>退件</h2><p class="small muted" style="margin:0">' + esc(x.staff + '・' + x.typeLabel + '・' + x.summary) + '</p>' +
-            '<label class="f" for="rjNote">退件原因（申請人會看到）</label><input class="input" id="rjNote" maxlength="200">' +
-            '<div class="btn-row"><button class="btn danger block" id="rjOk">確定退件</button></div>');
-          $('#rjNote', m.el).focus();
-          $('#rjOk', m.el).onclick = async function () {
-            var note = $('#rjNote', m.el).value.trim();
-            if (!note) return BM.toast('請填寫退件原因', true);
-            await BM.run(function () { return BM.api('attDecide', { token: token(), id: x.id, approve: false, note: note }); });
-            m.close();
-            BM.toast('已退件');
-            refreshAfterReview();
-          };
+        (isAdmin() && h.pendingEvents ? '<div class="card"><a href="#/review/events" class="hl-row"><span class="grow">醫學會修正申請</span><span class="cnt">' + h.pendingEvents + '</span><span class="go">›</span></a></div>' : '') +
+        (r.todo.length ? '<div class="card">' + r.todo.map(row).join('') + '</div>' : '<div class="card empty">—</div>') +
+        (r.done.length ? '<div class="section-title">最近審核過的</div><div class="card">' + r.done.map(row).join('') + '</div>' : '');
+      $$('[data-r]', root).forEach(function (a) {
+        a.onclick = function (e) {
+          e.preventDefault();
+          var x = r.todo.concat(r.done).filter(function (y) { return y.id === a.dataset.r; })[0];
+          A.openReq(x, function () { BM.cache(key, null); refreshPortal(); renderReview(box); });
         };
       });
     };
     BM.swr(key, function () { return BM.api('attReview', { token: token() }); }, draw);
   }
-  function refreshAfterReview() {
-    BM.cache('review_' + String(P.me.name).toLowerCase(), null);
-    refreshPortal();
-    route();
+  function renderEventsReview(box) {
+    box.innerHTML = '<div class="page-head"><h2>醫學會修正申請</h2></div><div id="admRoot"></div>';
+    BM.admin.events.mount($('#admRoot'), ['review'], 'review');
   }
 
   // ---------------- 我的 ----------------
@@ -389,29 +403,20 @@
       '<div class="card"><div class="rec-head"><b style="font-size:18px">' + esc(me.name) + '</b>' +
       (roleLabel(me) ? '<span class="badge gray">' + roleLabel(me) + '</span>' : '') + '</div>' +
       '<div class="small muted">' + esc(me.region || '') + '區</div></div>' +
-
       '<div class="section-title">頭像</div><div class="card"><div class="ava-grid" id="avaGrid">' +
       '<button type="button" class="ava-pick' + (!me.avatar ? ' on' : '') + '" data-ava="" title="預設"><span class="ava-def">' + icon('me') + '</span><span>預設</span></button>' +
       BM.avatars.list.map(function (a) {
         return '<button type="button" class="ava-pick' + (me.avatar === a.key ? ' on' : '') + '" data-ava="' + a.key + '" title="' + a.name + '">' + BM.avatars.svg(a.key, 52) + '<span>' + a.name + '</span></button>';
       }).join('') + '</div></div>' +
-
-      '<div class="section-title">我的申請</div>' +
-      '<div class="card">' + (canCor ? '<a class="menu-row" href="#/events/corrections">' + icon('events') + '醫學會修正申請</a>' : '') +
-      (moduleOf('attendance') ? '<a class="menu-row" href="#/attendance/fix">' + icon('attendance') + '補登打卡</a>' : '') +
-      '<div class="menu-row off">' + icon('leave') + '請假・加班<span class="soon">即將推出</span></div></div>' +
-
-      '<div class="section-title">假勤餘額</div><div class="card small muted">請假功能上線後，這裡會顯示特休和補休的剩餘時數。</div>' +
-
-      '<div class="section-title">通知設定</div><div class="card small muted">推播通知上線後，可以在這裡設定上下班提醒和審核通知。</div>' +
-
+      (moduleOf('attendance') ? '<div class="section-title">假勤餘額</div><div class="card" id="meBal"><div class="muted small">讀取中…</div></div>' : '') +
+      '<div class="section-title">我的申請</div><div class="card">' +
+      (moduleOf('attendance') ? '<a class="menu-row" href="#/attendance/apply">' + icon('apply') + '出勤申請</a>' : '') +
+      (canCor ? '<a class="menu-row" href="#/events/corrections">' + icon('events') + '醫學會修正申請</a>' : '') + '</div>' +
       '<div class="section-title">修改密碼</div><div class="card">' +
       '<label class="f" for="mOld">目前的密碼</label><input class="input" id="mOld" type="password" autocomplete="current-password" maxlength="20">' +
       '<label class="f" for="mNew">新密碼</label><input class="input" id="mNew" type="password" autocomplete="new-password" maxlength="20">' +
       '<label class="f" for="mNew2">再輸入一次</label><input class="input" id="mNew2" type="password" autocomplete="new-password" maxlength="20">' +
-      '<p class="small muted">' + (me.admin ? '管理員密碼 10–20 碼，需同時有英文與數字。' : '6–20 碼英文或數字，不能包含生日。') + '</p>' +
       '<div class="btn-row"><button class="btn" id="mPwBtn">修改密碼</button></div></div>' +
-
       '<div class="btn-row"><button class="btn danger block" id="mOut">登出</button></div>';
     $('#mPwBtn').onclick = async function () {
       var a = $('#mNew').value, b = $('#mNew2').value;
@@ -432,59 +437,126 @@
         BM.toast('頭像已更新');
       };
     });
+    if ($('#meBal')) {
+      BM.run(function () { return BM.api('attBalances', { token: token() }); }, { silent: true }).then(function (r) {
+        var el = $('#meBal');
+        if (!el) return;
+        var show = r.balances.filter(function (x) { return x.remaining !== null && (['annual', 'comp', 'personal', 'sick'].indexOf(x.key) >= 0 || x.used); });
+        el.innerHTML = '<div class="bal-grid">' + show.map(function (x) {
+          return '<div><span>' + esc(x.name) + '</span><b>' + esc(ATT.fmtDays(x.remaining)) + '</b></div>';
+        }).join('') + '</div>';
+      }).catch(function () { });
+    }
   }
 
-  // ---------------- 管理中心 ----------------
-  var ADMIN_TABS = [['events', '醫學會'], ['attendance', '出勤'], ['staff', '人員'], ['menu', '選單與權限']];
-  function renderAdmin(box, tab, sub, title) {
-    if (!ADMIN_TABS.some(function (t) { return t[0] === tab; })) tab = 'events';
-    box.innerHTML = '<div class="page-head"><h2>' + (title ? title : '管理中心') + '</h2>' +
-      (isAdmin() && !TEST ? '<a class="btn small ghost" href="test.html">🧪 測試模式</a>' : '') + '</div>' +
-      (title ? '' : '<nav class="tabs top">' + ADMIN_TABS.map(function (t) {
-        return '<a href="#/admin/' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + '</a>';
-      }).join('') + '</nav>') + '<div id="admRoot"></div>';
-    var root = $('#admRoot');
-    if (tab === 'menu') return renderMenuAdmin(root);
-    if (tab === 'attendance') return BM.admin.attendance.mount(root);
+  // ---------------- 系統設定（只有管理員） ----------------
+  var SET_TABS = [['staff', '人員'], ['perm', '選單與權限'], ['line', 'LINE 與推播'], ['fb', '問題回報']];
+  function renderSettings(box, tab) {
+    if (!SET_TABS.some(function (t) { return t[0] === tab; })) tab = 'staff';
+    box.innerHTML = '<div class="page-head"><h2>系統設定</h2></div>' +
+      '<nav class="tabs">' + SET_TABS.map(function (t) {
+        return '<button data-st="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + '</button>';
+      }).join('') + '</nav><div class="mod-body" id="setRoot"></div>';
+    $$('[data-st]', box).forEach(function (b) { b.onclick = function () { BM.go('settings/' + b.dataset.st); }; });
+    var root = $('#setRoot');
+    if (tab === 'perm') return renderPerm(root);
     if (tab === 'staff') return BM.admin.events.mount(root, ['staff'], 'staff');
-    return BM.admin.events.mount(root, title ? ['review'] : ['events', 'review', 'records', 'settings'], sub);
+    return BM.admin.events.mount(root, ['settings'], 'settings', { setMode: tab });
   }
 
-  // 選單與權限：分組名稱、順序、功能放哪一組；各角色可以使用哪些功能
-  async function renderMenuAdmin(root) {
-    root.innerHTML = '<div id="menuAdm"><div class="card empty">讀取中…</div></div>';
+  // 選單與權限：主管／行政／職員三組；點組別整組全選，展開可以逐人勾選
+  async function renderPerm(root) {
+    root.innerHTML = '<div id="permAdm"><div class="card empty">讀取中…</div></div>';
     var A = await BM.run(function () { return BM.api('portalAdmin', { token: BM.store('adminToken') }); });
     var menu = JSON.parse(JSON.stringify(A.menu));
-    var perms = JSON.parse(JSON.stringify(A.perms));
-    var name = function (k) { var m = A.modules.filter(function (x) { return x.key === k; })[0]; return m ? m.name : k; };
+    var allow = {};
+    A.keys.forEach(function (k) { allow[k.key] = {}; (A.allow[k.key] || []).forEach(function (id) { allow[k.key][id] = true; }); });
+    var open = null; // 'key|group' 展開中
+    var showMenu = false, showPages = false;
+    var people = function (g) { return A.people.filter(function (p) { return p.group === g; }); };
+    var groupOf = function (k) { var g = menu.filter(function (x) { return x.items.indexOf(k) >= 0; })[0]; return g ? g.name : '—'; };
+    var modName = function (k) { var m = A.modules.filter(function (x) { return x.key === k; })[0]; return m ? m.name : k; };
+    function cell(k, g) {
+      var ps = people(g), on = ps.filter(function (p) { return allow[k][p.id]; }).length;
+      var st = !ps.length ? '' : on === ps.length ? 'on' : on ? 'part' : '';
+      return '<td class="num"><span class="gk' + (open === k + '|' + g ? ' open' : '') + '">' +
+        '<button type="button" class="ck ' + st + '" data-gall="' + k + '|' + g + '" aria-label="整組"></button>' +
+        '<button type="button" class="gk-n" data-gopen="' + k + '|' + g + '">' + on + '/' + ps.length + ' ' + (open === k + '|' + g ? '▾' : '▸') + '</button></span></td>';
+    }
     function draw() {
-      var el = $('#menuAdm');
+      var el = $('#permAdm');
       if (!el) return;
-      el.innerHTML = '<p class="small muted">調整完按最下面的「儲存」，所有人的選單會跟著更新。</p>' +
-        menu.map(function (g, gi) {
-          return '<div class="card"><div class="grp-head"><input class="input" data-gname="' + gi + '" value="' + esc(g.name) + '" maxlength="20" aria-label="分組名稱">' +
-            '<button class="btn small ghost" data-gup="' + gi + '" ' + (gi === 0 ? 'disabled' : '') + ' aria-label="分組上移">↑</button>' +
-            '<button class="btn small ghost" data-gdown="' + gi + '" ' + (gi === menu.length - 1 ? 'disabled' : '') + ' aria-label="分組下移">↓</button>' +
-            '<button class="btn small danger" data-gdel="' + gi + '" ' + (g.items.length ? 'disabled title="分組裡還有功能，先移走才能刪除"' : '') + '>刪除</button></div>' +
-            (g.items.length ? g.items.map(function (k, ii) {
-              return '<div class="grp-item"><span class="grow">' + esc(name(k)) + '</span>' +
-                '<button class="btn small ghost" data-up="' + gi + ',' + ii + '" ' + (ii === 0 ? 'disabled' : '') + ' aria-label="上移">↑</button>' +
-                '<button class="btn small ghost" data-down="' + gi + ',' + ii + '" ' + (ii === g.items.length - 1 ? 'disabled' : '') + ' aria-label="下移">↓</button>' +
-                '<select class="input mini" data-move="' + gi + ',' + ii + '" aria-label="移到其他分組"><option value="">移到…</option>' +
-                menu.map(function (g2, gj) { return gj === gi ? '' : '<option value="' + gj + '">' + esc(g2.name) + '</option>'; }).join('') + '</select></div>';
-            }).join('') : '<div class="small muted">（這個分組沒有功能）</div>') + '</div>';
-        }).join('') +
-        '<div class="btn-row" style="margin-top:0"><button class="btn ghost" id="gAdd">＋ 新增分組</button></div>' +
-        '<div class="section-title">各角色可以使用的功能</div>' +
-        '<div class="card" style="padding:0"><table class="grid"><thead><tr><th>功能</th><th class="num">主管</th><th class="num">職員</th></tr></thead><tbody>' +
-        A.modules.map(function (m) {
-          return '<tr><td>' + esc(m.name) + (m.ready ? '' : ' <span class="soon">即將推出</span>') + '</td>' +
-            ['manager', 'staff'].map(function (r) {
-              return '<td class="num"><input type="checkbox" class="cb" data-perm="' + r + ',' + m.key + '"' + (perms[r][m.key] ? ' checked' : '') + ' aria-label="' + esc(m.name) + '"></td>';
-            }).join('') + '</tr>';
-        }).join('') + '</tbody></table></div>' +
-        '<p class="small muted">管理員一律可以使用全部功能。醫學會裡的各分頁另外在「醫學會 → 醫學會設定」調整。</p>' +
-        '<div class="btn-row"><button class="btn block" id="mSave">儲存</button></div>';
+      var groups = A.groups;
+      var rows = A.keys.map(function (k) {
+        var r = '<tr' + (k.key === 'export' ? ' class="sp"' : '') + '><td>' + esc(k.name) + '</td><td class="muted">' + esc(k.key === 'export' ? '—' : groupOf(k.key)) + '</td>' + groups.map(function (g) { return cell(k.key, g[0]); }).join('') + '</tr>';
+        if (open && open.split('|')[0] === k.key) {
+          var g = open.split('|')[1];
+          r += '<tr class="drop"><td colspan="' + (groups.length + 2) + '"><div class="who">' + people(g).map(function (p) {
+            return '<label class="chk' + (allow[k.key][p.id] ? ' on' : '') + '"><input type="checkbox" data-one="' + k.key + '|' + p.id + '"' + (allow[k.key][p.id] ? ' checked' : '') + '>' + esc((p.name ? p.name + ' ' : '') + p.en) + '</label>';
+          }).join('') + '</div></td></tr>';
+        }
+        return r;
+      }).join('');
+      el.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="grid perm2"><thead><tr><th>功能</th><th>選單分組</th>' +
+        groups.map(function (g) { return '<th class="num">' + g[1] + ' <small>' + people(g[0]).length + '</small></th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div class="card"><div class="set-t" style="display:flex;align-items:center">選單分組與順序<button class="btn small ghost" id="mToggle" style="margin-left:auto">' + (showMenu ? '收起' : '調整') + '</button></div>' +
+        (showMenu ? menuEditor() : '') + '</div>' +
+        '<div class="card"><div class="set-t" style="display:flex;align-items:center">醫學會分頁權限<button class="btn small ghost" id="pToggle" style="margin-left:auto">' + (showPages ? '收起' : '調整') + '</button></div>' +
+        (showPages ? '<table class="grid"><thead><tr><th>分頁</th><th class="num">主管</th><th class="num">職員</th></tr></thead><tbody>' +
+        [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '修正申請']].map(function (p) {
+          return '<tr><td>' + p[1] + '</td>' + ['manager', 'staff'].map(function (r) {
+            return '<td class="num"><input type="checkbox" class="cb" data-pp="' + r + '|' + p[0] + '"' + (A.pagePerms[r][p[0]] ? ' checked' : '') + '></td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table>' : '') + '</div>' +
+        '<div class="btn-row"><button class="btn block" id="pSave">儲存</button></div>';
+      $$('[data-gall]', el).forEach(function (b) {
+        b.onclick = function () {
+          var p = b.dataset.gall.split('|'), ps = people(p[1]);
+          var all = ps.every(function (x) { return allow[p[0]][x.id]; });
+          ps.forEach(function (x) { allow[p[0]][x.id] = !all; });
+          draw();
+        };
+      });
+      $$('[data-gopen]', el).forEach(function (b) { b.onclick = function () { open = open === b.dataset.gopen ? null : b.dataset.gopen; draw(); }; });
+      $$('[data-one]', el).forEach(function (c) { c.onchange = function () { var p = c.dataset.one.split('|'); allow[p[0]][p[1]] = c.checked; draw(); }; });
+      $$('[data-pp]', el).forEach(function (c) {
+        c.onchange = async function () {
+          var pp = JSON.parse(JSON.stringify(A.pagePerms)), k = c.dataset.pp.split('|');
+          pp[k[0]][k[1]] = c.checked;
+          try { await BM.run(function () { return BM.api('savePerms', { token: BM.store('adminToken'), perms: pp }); }); A.pagePerms = pp; BM.toast('已儲存'); }
+          catch (e) { c.checked = !c.checked; }
+        };
+      });
+      $('#mToggle', el).onclick = function () { showMenu = !showMenu; draw(); };
+      $('#pToggle', el).onclick = function () { showPages = !showPages; draw(); };
+      if (showMenu) bindMenuEditor(el);
+      $('#pSave', el).onclick = async function () {
+        if (menu.some(function (g) { return !String(g.name).trim(); })) return BM.toast('分組名稱不能空白', true);
+        var out = {};
+        A.keys.forEach(function (k) { out[k.key] = Object.keys(allow[k.key]).filter(function (id) { return allow[k.key][id]; }); });
+        A = await BM.run(function () { return BM.api('saveMenu', { token: BM.store('adminToken'), menu: menu, allow: out }); });
+        menu = JSON.parse(JSON.stringify(A.menu));
+        BM.toast('已儲存');
+        draw();
+        refreshPortal();
+      };
+    }
+    function menuEditor() {
+      return menu.map(function (g, gi) {
+        return '<div class="grp-box"><div class="grp-head"><input class="input" data-gname="' + gi + '" value="' + esc(g.name) + '" maxlength="20">' +
+          '<button class="btn small ghost" data-gup="' + gi + '" ' + (gi === 0 ? 'disabled' : '') + '>↑</button>' +
+          '<button class="btn small ghost" data-gdown="' + gi + '" ' + (gi === menu.length - 1 ? 'disabled' : '') + '>↓</button>' +
+          '<button class="btn small danger" data-gdel="' + gi + '" ' + (g.items.length ? 'disabled' : '') + '>刪除</button></div>' +
+          g.items.map(function (k, ii) {
+            return '<div class="grp-item"><span class="grow">' + esc(modName(k)) + '</span>' +
+              '<button class="btn small ghost" data-up="' + gi + ',' + ii + '" ' + (ii === 0 ? 'disabled' : '') + '>↑</button>' +
+              '<button class="btn small ghost" data-down="' + gi + ',' + ii + '" ' + (ii === g.items.length - 1 ? 'disabled' : '') + '>↓</button>' +
+              '<select class="input mini" data-move="' + gi + ',' + ii + '"><option value="">移到…</option>' +
+              menu.map(function (g2, gj) { return gj === gi ? '' : '<option value="' + gj + '">' + esc(g2.name) + '</option>'; }).join('') + '</select></div>';
+          }).join('') + '</div>';
+      }).join('') + '<div class="btn-row"><button class="btn small ghost" id="gAdd">＋ 新增分組</button></div>';
+    }
+    function bindMenuEditor(el) {
       var at = function (s) { return s.split(',').map(Number); };
       $$('[data-gname]', el).forEach(function (i) { i.oninput = function () { menu[+i.dataset.gname].name = i.value; }; });
       $$('[data-gup]', el).forEach(function (b) { b.onclick = function () { var i = +b.dataset.gup; menu.splice(i - 1, 0, menu.splice(i, 1)[0]); draw(); }; });
@@ -493,25 +565,9 @@
       $$('[data-up]', el).forEach(function (b) { b.onclick = function () { var p = at(b.dataset.up), it = menu[p[0]].items; it.splice(p[1] - 1, 0, it.splice(p[1], 1)[0]); draw(); }; });
       $$('[data-down]', el).forEach(function (b) { b.onclick = function () { var p = at(b.dataset.down), it = menu[p[0]].items; it.splice(p[1] + 1, 0, it.splice(p[1], 1)[0]); draw(); }; });
       $$('[data-move]', el).forEach(function (s) {
-        s.onchange = function () {
-          if (s.value === '') return;
-          var p = at(s.dataset.move);
-          var k = menu[p[0]].items.splice(p[1], 1)[0];
-          menu[+s.value].items.push(k);
-          draw();
-        };
+        s.onchange = function () { if (s.value === '') return; var p = at(s.dataset.move); menu[+s.value].items.push(menu[p[0]].items.splice(p[1], 1)[0]); draw(); };
       });
-      $$('[data-perm]', el).forEach(function (c) { c.onchange = function () { var p = c.dataset.perm.split(','); perms[p[0]][p[1]] = c.checked; }; });
       $('#gAdd', el).onclick = function () { menu.push({ name: '新分組', items: [] }); draw(); };
-      $('#mSave', el).onclick = async function () {
-        if (menu.some(function (g) { return !String(g.name).trim(); })) return BM.toast('分組名稱不能空白', true);
-        A = await BM.run(function () { return BM.api('saveMenu', { token: BM.store('adminToken'), menu: menu, perms: perms }); });
-        menu = JSON.parse(JSON.stringify(A.menu));
-        perms = JSON.parse(JSON.stringify(A.perms));
-        BM.toast('已儲存');
-        draw();
-        refreshPortal();
-      };
     }
     draw();
   }

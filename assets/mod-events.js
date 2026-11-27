@@ -4,11 +4,11 @@
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
   var S = { me: null, events: [], tab: 'events', year: String(new Date().getFullYear()) };
   var esc = BM.esc;
-  var TABS = [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '修正申請']];
+  var TABS = [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '修正申請'], ['settings', '設定']];
 
   function token() { return BM.store('staffToken'); }
   function myKey() { return S.me.admin ? 'admin' : String(S.me.name).toLowerCase(); }
-  function canSee(t) { return !!(S.me.pages && S.me.pages[t]); }
+  function canSee(t) { return t === 'settings' ? !!S.me.admin : !!(S.me.pages && S.me.pages[t]); }
   function alive() { return !!document.getElementById('modEvents'); } // 已切換到別的功能就不要再畫
 
   // 掛載：root 是內容區；tab 可指定一開始顯示的分頁
@@ -19,11 +19,11 @@
       root.innerHTML = '<div class="card empty">你的帳號目前沒有可以查看的醫學會頁面，請洽管理員。</div>';
       return;
     }
-    root.innerHTML = '<div id="modEvents"><nav class="tabs" id="tabs">' + tabs.map(function (t) {
+    root.innerHTML = '<div id="modEvents"><nav class="tabs" id="evTabs">' + tabs.map(function (t) {
       return '<button data-tab="' + t[0] + '">' + t[1] + '</button>';
     }).join('') + '</nav><div class="mod-body">' +
-      TABS.map(function (t) { return '<div id="tab-' + t[0] + '" hidden></div>'; }).join('') + '</div></div>';
-    $$('#tabs button').forEach(function (b) { b.onclick = function () { BM.go('events/' + b.dataset.tab); }; });
+      TABS.map(function (t) { return '<div id="evtab-' + t[0] + '" hidden></div>'; }).join('') + '</div></div>';
+    $$('#evTabs button').forEach(function (b) { b.onclick = function () { BM.go('events/' + b.dataset.tab); }; });
     S.events = BM.cached('ev_' + myKey()) || [];
     var first = tabs[0][0];
     switchTab(tab && canSee(tab) ? tab : (canSee(S.tab) ? S.tab : first));
@@ -32,9 +32,13 @@
 
   function switchTab(t) {
     S.tab = t;
-    $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
-    TABS.forEach(function (x) { $('#tab-' + x[0]).hidden = x[0] !== t; });
-    if (t === 'events') renderEvents();
+    $$('#evTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
+    TABS.forEach(function (x) { $('#evtab-' + x[0]).hidden = x[0] !== t; });
+    // 管理者：活動報名直接是管理清單（可以新增、編輯）；設定分頁是醫學會的設定
+    if (S.me.admin) { $('#evtab-events').innerHTML = ''; $('#evtab-settings').innerHTML = ''; } // 兩個分頁共用同一套管理畫面，一次只放一個
+    if (t === 'events' && S.me.admin) BM.admin.events.mount($('#evtab-events'), ['events']);
+    else if (t === 'events') renderEvents();
+    if (t === 'settings') BM.admin.events.mount($('#evtab-settings'), ['settings'], null, { setMode: 'events' });
     if (t === 'records') loadRecords();
     if (t === 'corrections') loadCorrections();
     window.scrollTo(0, 0);
@@ -78,7 +82,8 @@
   }
 
   function renderEvents() {
-    var box = $('#tab-events');
+    if (S.me.admin) return; // 管理者看的是管理清單
+    var box = $('#evtab-events');
     if (!box) return;
     var today = BM.today();
     var thisYear = today.slice(0, 4);
@@ -181,7 +186,7 @@
 
   // ---------------- 參加紀錄 ----------------
   async function loadRecords() {
-    var box = $('#tab-records');
+    var box = $('#evtab-records');
     if (!box) return;
     box.innerHTML = BM.yearSelect(S.year, 'yearSel') + '<div id="recList"></div>';
     $('#yearSel').onchange = function () { S.year = this.value; loadRecords(); };
@@ -214,7 +219,7 @@
 
   // ---------------- 修正申請 ----------------
   async function loadCorrections() {
-    var box = $('#tab-corrections');
+    var box = $('#evtab-corrections');
     if (!box) return;
     var today = BM.today();
     var listKey = 'cor_' + myKey();

@@ -1,77 +1,60 @@
-/* 功能：出勤紀錄（打卡、出勤紀錄、補登打卡、全員出勤）。由 shell.js 掛到內容區。 */
+/* 功能：出勤紀錄（出勤明細、申請、工作日曆）。打卡在首頁。由 shell.js 掛到內容區。 */
 (function () {
   var $ = function (s, root) { return (root || document).querySelector(s); };
   var $$ = function (s, root) { return Array.prototype.slice.call((root || document).querySelectorAll(s)); };
   var esc = BM.esc;
-  var S = { me: null, tab: 'punch', ym: '', viewId: '', teamDate: '' };
-  var TABS = [['punch', '打卡'], ['records', '出勤紀錄'], ['fix', '補登打卡'], ['leave', '請假'], ['ot', '加班'], ['team', '全員出勤']];
+  var S = { me: null, tab: 'detail', ym: '', who: '', sort: { key: 'date', dir: -1 }, applyType: 'fix', prefill: null, edit: null, calYm: '' };
+  var TABS = [['detail', '出勤明細'], ['apply', '申請'], ['calendar', '工作日曆']];
   var STATUS = { pending: ['審核中', 'warn'], approved: ['已核准', ''], rejected: ['已退件', 'bad'], cancelled: ['已取消', 'gray'] };
   var ACT = { submit: '送出', resubmit: '修改後重新送出', edit: '修改', cancel: '取消', cancelReq: '申請取消', withdraw: '撤回修改',
     approve: '核准', reject: '退件', skip: '跳過' };
+  var ST_LABEL = { ok: ['正常', ''], abnormal: ['異常', 'bad'], working: ['上班中', 'gray'], none: ['尚未打卡', 'gray'], off: ['休假日', 'gray'], before: ['', 'gray'] };
 
   function token() { return BM.store('staffToken'); }
   function alive() { return !!document.getElementById('modAtt'); }
-  function isViewer() { return ['admin', 'manager', 'finance'].indexOf(S.me.role) >= 0 || S.me.admin; }
-  function api(action, data, opts) {
-    return BM.run(function () { return BM.api(action, Object.assign({ token: token() }, data || {})); }, opts);
-  }
+  function isHR() { return S.me.admin || S.me.role === 'admin'; }
+  function api(action, data, opts) { return BM.run(function () { return BM.api(action, Object.assign({ token: token() }, data || {})); }, opts); }
   function key(k) { return 'att_' + String(S.me.name).toLowerCase() + '_' + k; }
+  function md(d) { return d.slice(5).replace('-', '/'); }
+  function shiftYm(ym, n) { var p = ym.split('-'); var d = new Date(+p[0], +p[1] - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function wd(d) { return '日一二三四五六'.charAt(ATT.weekday(d)); }
 
   function mount(root, me, tab) {
     S.me = me;
-    var tabs = TABS.filter(function (t) { return t[0] !== 'team' || isViewer(); });
-    root.innerHTML = '<div id="modAtt"><nav class="tabs" id="attTabs">' + tabs.map(function (t) {
-      return '<button data-tab="' + t[0] + '">' + t[1] + '</button>';
+    // 舊網址：打卡、出勤紀錄、補登、請假、加班
+    var alias = { punch: 'detail', records: 'detail', team: 'detail', fix: 'apply', leave: 'apply', ot: 'apply' };
+    if (alias[tab]) { if (tab === 'leave' || tab === 'ot' || tab === 'fix') S.applyType = tab; tab = alias[tab]; }
+    var tabs = TABS.filter(function (t) { return t[0] !== 'calendar' || isHR(); });
+    var t = tabs.some(function (x) { return x[0] === tab; }) ? tab : 'detail';
+    S.tab = t;
+    root.innerHTML = '<div id="modAtt"><nav class="tabs" id="attTabs">' + tabs.map(function (x) {
+      return '<button data-tab="' + x[0] + '" class="' + (x[0] === t ? 'on' : '') + '">' + x[1] + '</button>';
     }).join('') + '</nav><div class="mod-body" id="attBody"></div></div>';
     $$('#attTabs button').forEach(function (b) { b.onclick = function () { BM.go('attendance/' + b.dataset.tab); }; });
-    var t = tabs.some(function (x) { return x[0] === tab; }) ? tab : 'punch';
-    S.tab = t;
-    $$('#attTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
     var body = $('#attBody');
-    if (t === 'punch') return renderPunch(body);
-    if (t === 'records') return renderRecords(body);
-    if (t === 'fix') return renderFix(body);
-    if (t === 'team') return renderTeam(body);
-
-    body.innerHTML = '<div class="card empty"><b>' + (t === 'leave' ? '請假' : '加班') + '即將推出</b>' +
-      '<p class="small muted">下一階段開放線上' + (t === 'leave' ? '請假，假勤餘額也會在這裡顯示。' : '申請加班（需主動申請才會記錄），可以選擇領加班費或換補休。') + '</p></div>';
+    if (t === 'detail') return renderDetail(body);
+    if (t === 'apply') return renderApply(body);
+    if (t === 'calendar') return renderCalendar(body);
   }
 
-  // ---------------- 打卡 ----------------
-  var ST_LABEL = { ok: ['正常', ''], abnormal: ['異常', 'bad'], working: ['上班中', 'gray'], none: ['尚未打卡', 'gray'], off: ['休假日', 'gray'], before: ['未開始', 'gray'] };
-  // 狀態標籤；showReasons＝要不要列出異常原因（HR、本人看得到）
-  function dayBadge(d, showReasons) {
-    var s = ST_LABEL[d.status] || ['', 'gray'];
-    var label = d.status === 'off' ? (d.holiday || '休假日') : s[0];
-    var rs = showReasons !== false && d.reasons && d.reasons.length && d.status !== 'ok' ? d.reasons : [];
-    return '<span class="badge ' + s[1] + '">' + esc(label) + '</span>' +
-      (rs.length ? '<span class="att-reason">' + esc(rs.join('、')) + '</span>' : '') +
-      (d.pendingFix ? ' <span class="badge gray">補登審核中</span>' : '');
-  }
-  // 今日出勤卡：左邊日期和上下班時間，右邊一顆「打卡」按鈕（顯示現在時間）
-  // opts.link：首頁用，日期那一行右邊放「出勤紀錄 ›」
+  // ======================= 首頁的打卡卡片 =======================
   function todayCard(t, opts) {
     var d = t.day, next = !d.inTime ? 'in' : 'out';
-    var hint = d.status === 'working' && d.expectedOut ? '<span class="muted small">可下班 ' + d.expectedOut + '</span>' : '';
     return '<div class="att-date2">' + BM.icon('attendance') + '<span>' + BM.fmtDate(d.date) + '</span>' +
-      (opts && opts.link ? '<a class="small att-link" href="#/attendance/records">出勤紀錄 ›</a>' : '') + '</div>' +
-      '<div class="att-card2">' +
-      '<div class="att-left">' +
-      '<div class="att-line"><span>上班：</span><b>' + (d.inTime || '<i>—</i>') + '</b>' + (d.inFix ? '<small>補登</small>' : '') + '</div>' +
-      '<div class="att-line"><span>下班：</span><b>' + (d.outTime || '<i>—</i>') + '</b>' + (d.outFix ? '<small>補登</small>' : '') + '</div>' +
-      '<div class="att-status">' + dayBadge(d) + hint + '</div></div>' +
-      '<button class="att-big-btn ' + next + '" data-punch="' + next + '" aria-label="' + (next === 'in' ? '上班打卡' : '下班打卡') + '">' +
-      '<b id="attClock">' + esc(t.now) + '</b><span>打卡</span><small>' + (next === 'in' ? '上班' : d.outTime ? '更新下班' : '下班') + '</small></button>' +
-      '</div>';
+      (opts && opts.link ? '<a class="small att-link" href="#/attendance/detail">出勤紀錄 ›</a>' : '') + '</div>' +
+      '<div class="att-card2"><div class="att-left">' +
+      '<div class="att-line"><span>上班：</span><b>' + (d.inTime || '<i>—</i>') + '</b></div>' +
+      '<div class="att-line"><span>下班：</span><b>' + (d.outTime || '<i>—</i>') + '</b></div>' +
+      '</div><button class="att-big-btn ' + next + '" data-punch="' + next + '" aria-label="打卡">' +
+      '<b id="attClock">' + esc(t.now) + '</b><span>打卡</span></button></div>';
   }
-  function punchButton() { return ''; } // 按鈕已經在 todayCard 裡（保留給首頁呼叫）
+  function punchButton() { return ''; }
   function bindPunch(root, after) {
     $$('[data-punch]', root).forEach(function (btn) { btn.onclick = function () { doPunch(btn.dataset.punch, after); }; });
   }
-  // 畫面上的時鐘每 10 秒更新一次（實際打卡時間以伺服器為準）
   var tickTimer = null;
   function tpeNow() {
-    var d = new Date(Date.now() + (BM.clockSkew || 0));
+    var d = new Date();
     var t = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000);
     return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
   }
@@ -83,273 +66,397 @@
       c.textContent = tpeNow();
     }, 10000);
   }
-  // 打卡：第一下是上班，之後是下班；已經有下班卡時先問要不要覆蓋。打完依狀態提示
   async function doPunch(kind, after) {
     var t = await api('attPunch', { kind: kind });
     if (t.needConfirm) {
-      var lbl = t.kindLabel;
-      var ok = await BM.ask('要覆蓋今天的' + lbl + '卡嗎？\n今天已在 ' + t.prev + ' 打過' + lbl + '卡', { ok: '確定覆蓋' });
+      var ok = await BM.ask('要覆蓋今天的' + t.kindLabel + '卡嗎？\n今天已在 ' + t.prev + ' 打過' + t.kindLabel + '卡', { ok: '確定覆蓋' });
       if (!ok) return;
       t = await api('attPunch', { kind: kind, overwrite: true });
     }
-    BM.cache(key('today'), t);
-    var d = t.day, tm = t.done.time, lbl2 = kind === 'in' ? '上班' : '下班';
-    if (kind === 'in' && d.reasons && d.reasons.length) {
-      BM.notice(tm + ' 上班打卡成功', '已超過 9:30，今天的出勤會標示異常。\n如果早上有請假或公出，請記得補請假。', { tone: 'warn' });
-    } else if (kind === 'out' && d.status === 'abnormal') {
-      BM.notice(tm + ' 下班打卡成功', '今天的出勤異常：' + d.reasons.join('、') + '。\n' +
-        (d.missingIn ? '請到「補登打卡」補上今天的上班時間。' : '如果有請假或公出，請記得補請假。'), { tone: 'warn' });
-    } else {
-      BM.toast(lbl2 + '打卡成功 ' + tm + (t.done.replaced ? '（已覆蓋 ' + t.done.replaced + '）' : ''));
-    }
+    var d = t.day, tm = t.done.time;
+    if (kind === 'in' && d.reasons && d.reasons.length) BM.notice(tm + ' 上班打卡成功', '已超過 9:30', { tone: 'warn' });
+    else if (kind === 'out' && d.status === 'abnormal') BM.notice(tm + ' 下班打卡成功', d.reasons.join('、'), { tone: 'warn' });
+    else BM.toast((kind === 'in' ? '上班' : '下班') + '打卡成功 ' + tm);
     if (after) after(t);
   }
-  function renderPunch(body) {
-    var draw = function (t) {
-      if (!alive() || S.tab !== 'punch') return;
-      body.innerHTML = '<div class="card">' + todayCard(t) + '</div>' +
-        (t.punches.length ? '<div class="section-title">今天的打卡</div><div class="card">' + t.punches.map(function (p) {
-          return '<div class="att-row"><b>' + p.time + '</b><span>' + p.kindLabel + '卡</span>' + (p.fix ? '<span class="badge gray">補登</span>' : '') + '</div>';
-        }).join('') + '</div>' : '') +
-        '<p class="small muted att-rule">工作日 9:30–18:00 要在班。9:30 前上班的人，從上班起滿 9 小時（含午休 1 小時）就可以下班，例如 8:00 上班、17:00 下班。' +
-        '9:30 以後才上班，或下班時間不夠，當天會標示異常；缺的時段如果有請假就算正常。下班卡按錯可以再按一次覆蓋。打卡時間以伺服器時間為準。</p>' +
-        '<div class="btn-row"><a class="btn ghost" href="#/attendance/fix">忘了打卡？申請補登</a></div>';
-      bindPunch(body, draw);
-      tick();
-    };
-    var c = BM.cached(key('today'));
-    if (!c) body.innerHTML = '<div class="card empty">讀取中…</div>';
-    BM.swr(key('today'), function () { return BM.api('attToday', { token: token() }); }, draw);
-  }
 
-  // ---------------- 出勤紀錄（月） ----------------
-  function shiftYm(ym, n) { var p = ym.split('-'); var d = new Date(+p[0], +p[1] - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
-  function renderRecords(body) {
+  // ======================= 出勤明細 =======================
+  function dayBadge(d, showReasons) {
+    if (d.status === 'before') return '';
+    var s = ST_LABEL[d.status] || ['', 'gray'];
+    var label = d.status === 'off' ? (d.holiday || '休假日') : s[0];
+    var rs = showReasons !== false && d.reasons && d.reasons.length && d.status !== 'ok' ? d.reasons : [];
+    return '<span class="badge ' + s[1] + '">' + esc(label) + '</span>' + (rs.length ? '<span class="att-reason">' + esc(rs.join('、')) + '</span>' : '');
+  }
+  function tm(t, fix) { return t ? t + (fix ? '<span class="fx">補</span>' : '') : '—'; }
+  function renderDetail(body) {
     if (!S.ym) S.ym = BM.today().slice(0, 7);
-    var k = key('m_' + (S.viewId || 'me') + '_' + S.ym);
+    var k = key('m_' + (S.who || 'me') + '_' + S.ym);
     var draw = function (m) {
-      if (!alive() || S.tab !== 'records') return;
-      var s = m.summary;
+      if (!alive() || S.tab !== 'detail') return;
       var thisMonth = S.ym >= BM.today().slice(0, 7);
-      body.innerHTML = '<div class="att-month-bar">' +
-        '<button class="btn small ghost" id="mPrev" aria-label="上個月">‹</button><b>' + S.ym.replace('-', ' 年 ') + ' 月</b>' +
+      var people = m.people || [];
+      var bar = '<div class="att-month-bar"><button class="btn small ghost" id="mPrev" aria-label="上個月">‹</button><b>' + S.ym.replace('-', ' 年 ') + ' 月</b>' +
         '<button class="btn small ghost" id="mNext" aria-label="下個月"' + (thisMonth ? ' disabled' : '') + '>›</button>' +
-        (isViewer() ? '<select class="input mini" id="mWho"><option value="">我自己</option></select>' : '') + '</div>' +
-        (S.viewId ? '<p class="small muted" style="margin:0 4px 8px">正在看：<b>' + esc(m.staff) + '</b></p>' : '') +
-        '<div class="att-sum">' +
-        sumCell('出勤天數', s.present) + sumCell('正常', s.ok) + sumCell('異常', s.abnormal, s.abnormal) + sumCell('補登', s.fix) + '</div>' +
-        (m.days.length ? '<div class="card att-days">' + m.days.map(function (d) { return dayRow(d, m.detail); }).join('') + '</div>' : '<div class="card empty">這個月還沒有資料</div>');
-      $('#mPrev').onclick = function () { S.ym = shiftYm(S.ym, -1); renderRecords(body); };
-      $('#mNext').onclick = function () { S.ym = shiftYm(S.ym, 1); renderRecords(body); };
-      if ($('#mWho')) fillWho($('#mWho'), body);
+        (people.length ? '<select class="input mini att-who" id="mWho"><option value="all"' + (S.who === 'all' ? ' selected' : '') + '>全部</option>' +
+          people.map(function (p) { return '<option value="' + esc(p.id) + '"' + ((S.who || myId(people)) === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select>' : '') +
+        '<span class="grow"></span>' + (m.canExport || people.length ? '<button class="btn small" id="mXlsx">匯出 Excel</button>' : '') + '</div>';
+      if (S.who === 'all') body.innerHTML = bar + allTable(m);
+      else {
+        var s = m.summary;
+        var mine = !S.who || S.who === myId(people);
+        body.innerHTML = bar + '<div class="att-sum">' + sumCell('出勤天數', s.present) + sumCell('正常', s.ok) + sumCell('異常', s.abnormal, s.abnormal) + sumCell('補登', s.fix) + '</div>' +
+          (m.days.length ? '<div class="card att-days">' + m.days.map(function (d) { return dayRow(d, m.detail, mine); }).join('') + '</div>' : '<div class="card empty">沒有資料</div>');
+      }
+      $('#mPrev').onclick = function () { S.ym = shiftYm(S.ym, -1); renderDetail(body); };
+      $('#mNext').onclick = function () { S.ym = shiftYm(S.ym, 1); renderDetail(body); };
+      if ($('#mWho')) $('#mWho').onchange = function () { S.who = this.value === myId(people) ? '' : this.value; renderDetail(body); };
+      if ($('#mXlsx')) $('#mXlsx').onclick = function () { exportXlsx(m); };
       $$('[data-fix]', body).forEach(function (b) {
-        b.onclick = function () { openFixForm(null, { date: b.dataset.date, kind: b.dataset.fix }); };
+        b.onclick = function () { S.prefill = JSON.parse(b.dataset.fix); S.applyType = 'fix'; S.edit = null; BM.go('attendance/apply'); };
+      });
+      $$('[data-sort]', body).forEach(function (th) {
+        th.onclick = function () {
+          var kk = th.dataset.sort;
+          S.sort = S.sort.key === kk ? { key: kk, dir: -S.sort.dir } : { key: kk, dir: kk === 'date' ? -1 : 1 };
+          draw(m);
+        };
       });
     };
-    var c = BM.cached(k);
-    if (!c) body.innerHTML = '<div class="card empty">讀取中…</div>';
-    BM.swr(k, function () { return BM.api('attMonth', { token: token(), ym: S.ym, staffId: S.viewId }); }, draw);
+    if (!BM.cached(k)) body.innerHTML = '<div class="card empty">讀取中…</div>';
+    BM.swr(k, function () { return BM.api('attMonth', { token: token(), ym: S.ym, staffId: S.who }); }, draw);
   }
+  function myId(people) { var m = people.filter(function (p) { return p.name.split(' ').pop() === S.me.name; })[0]; return m ? m.id : ''; }
   function sumCell(label, n, warn) { return '<div class="' + (warn ? 'warn' : '') + '"><b>' + n + '</b><span>' + label + '</span></div>'; }
-  function dayRow(d, detail) {
-    var off = !d.workday;
-    var mine = !S.viewId;
-    var acts = mine && !d.pendingFix ? (d.missingIn ? '<button class="btn small ghost" data-fix="in" data-date="' + d.date + '">補登上班</button>' : '') +
-      (d.missingOut ? '<button class="btn small ghost" data-fix="out" data-date="' + d.date + '">補登下班</button>' : '') : '';
-    return '<div class="att-day' + (off ? ' off' : '') + '">' +
-      '<div class="ad-date">' + BM.fmtDate(d.date, false) + (off ? '<small>' + esc(d.holiday || '休假日') + '</small>' : '') + '</div>' +
-      '<div class="ad-times">' + (d.inTime || d.outTime ? '<span>' + (d.inTime || '--:--') + (d.inFix ? '*' : '') + '</span><span class="muted">→</span><span>' +
-        (d.outTime || '--:--') + (d.outFix ? '*' : '') + '</span>' : '<span class="muted">' + (off ? '' : '—') + '</span>') + '</div>' +
-      '<div class="ad-flags">' + (off && !d.inTime ? '' : dayBadge(d, detail !== false)) + acts + '</div></div>';
+  // 異常的那一天：「申請補登」自動帶入缺的部分
+  function fixPrefill(d) {
+    var p = { date: d.date, inTime: '', outTime: '', useIn: false, useOut: false };
+    d.reasons.forEach(function (r) {
+      if (r === '缺上班卡') p.useIn = true;
+      else if (r === '缺下班卡') p.useOut = true;
+      else {
+        var g = r.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/);
+        if (!g) return;
+        if (g[1] === '09:30' || (d.inTime && g[2] === d.inTime)) { p.useIn = true; p.inTime = g[1]; }
+        else { p.useOut = true; p.outTime = g[2]; }
+      }
+    });
+    return p;
   }
-  async function fillWho(sel, body) {
-    var list = BM.cached(key('staffList'));
-    var put = function (l) {
-      sel.innerHTML = '<option value="">我自己</option>' + l.filter(function (p) { return p.en !== S.me.name; }).map(function (p) {
-        return '<option value="' + esc(p.id) + '"' + (p.id === S.viewId ? ' selected' : '') + '>' + esc(p.en) + '</option>';
-      }).join('');
-    };
-    if (list) put(list);
-    sel.onchange = function () { S.viewId = sel.value; renderRecords(body); };
-    if (!list) {
-      var t = await api('attTeam', { date: BM.today() }, { silent: true });
-      BM.cache(key('staffList'), t.staffList);
-      if (alive()) put(t.staffList);
+  function dayRow(d, detail, mine) {
+    var off = !d.workday;
+    var act = '';
+    if (mine && d.status === 'abnormal') {
+      act = d.pendingFix ? '<button class="btn small" disabled>補登申請中</button>' :
+        '<button class="btn small" data-fix="' + esc(JSON.stringify(fixPrefill(d))) + '">申請補登</button>';
     }
+    return '<div class="att-day' + (off ? ' off' : '') + '">' +
+      '<div class="ad-date">' + md(d.date) + '（' + wd(d.date) + '）</div>' +
+      '<div class="ad-times">' + (d.inTime || d.outTime ? tm(d.inTime, d.inFix) + '<span class="muted">→</span>' + tm(d.outTime, d.outFix) : '<span class="muted">—</span>') + '</div>' +
+      '<div class="ad-st">' + (off && !d.inTime && !d.outTime ? '' : dayBadge(d, detail !== false)) + '</div>' +
+      '<div class="ad-act">' + act + '</div></div>';
+  }
+  function allTable(m) {
+    var rows = m.rows.slice();
+    var sk = S.sort.key, dir = S.sort.dir;
+    var val = { date: function (r) { return r.date; }, name: function (r) { return r.staff; }, status: function (r) { return r.status === 'abnormal' ? 0 : r.status === 'ok' ? 2 : 1; } };
+    rows.sort(function (a, b) {
+      var x = val[sk](a), y = val[sk](b);
+      var c = x < y ? -1 : x > y ? 1 : 0;
+      return c * dir || (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || a.staff.localeCompare(b.staff);
+    });
+    var th = function (k, label) {
+      return '<th data-sort="' + k + '" class="sortable' + (sk === k ? ' on' : '') + '">' + label + '<span class="ar">' + (sk === k ? (dir > 0 ? '▲' : '▼') : '⇅') + '</span></th>';
+    };
+    return '<div class="card" style="padding:0;overflow:auto"><table class="grid att-all"><thead><tr>' + th('date', '日期') + th('name', '姓名') +
+      '<th>上班</th><th>下班</th>' + th('status', '狀態') + '</tr></thead><tbody>' +
+      (rows.length ? rows.map(function (r) {
+        return '<tr><td>' + md(r.date) + '（' + wd(r.date) + '）</td><td>' + esc(r.staff) + '</td><td>' + tm(r.inTime, r.inFix) + '</td><td>' + tm(r.outTime, r.outFix) + '</td>' +
+          '<td>' + (r.workday ? dayBadge(r, m.detail) : '<span class="badge gray">' + esc(r.holiday || '休假日') + '</span>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="muted">—</td></tr>') + '</tbody></table></div>';
+  }
+  function stText(d) {
+    if (!d.workday && !d.inTime && !d.outTime) return d.holiday || '休假日';
+    return (ST_LABEL[d.status] || [''])[0] + (d.reasons && d.reasons.length && d.status !== 'ok' ? '：' + d.reasons.join('、') : '');
+  }
+  function exportXlsx(m) {
+    var head = ['日期', '星期', '姓名', '上班', '下班', '狀態'];
+    var rows;
+    if (S.who === 'all') {
+      rows = m.rows.map(function (r) { return [r.date, wd(r.date), r.staff, r.inTime + (r.inFix ? '（補登）' : ''), r.outTime + (r.outFix ? '（補登）' : ''), stText(r)]; });
+    } else {
+      rows = m.days.slice().reverse().map(function (d) { return [d.date, wd(d.date), m.staff, d.inTime + (d.inFix ? '（補登）' : ''), d.outTime + (d.outFix ? '（補登）' : ''), stText(d)]; });
+    }
+    BM.xlsx('出勤明細_' + S.ym + (S.who === 'all' ? '_全部' : '_' + m.staff.split(' ').pop()) + '.xlsx', [{ name: S.ym, rows: [head].concat(rows) }]);
   }
 
-  // ---------------- 補登打卡 ----------------
-  function statusBadge(r) {
+  // ======================= 申請（補登打卡／請假／加班） =======================
+  function statusChip(r) {
     var s = STATUS[r.status] || [r.status, 'gray'];
-    var txt = r.status === 'pending' ? (r.mode === 'cancel' ? '取消審核中' : r.mode === 'edit' ? '修改審核中' : '審核中') + (r.waitingFor ? '・等 ' + r.waitingFor : '') : s[0];
-    return '<span class="badge ' + s[1] + '">' + esc(txt) + '</span>';
+    var txt = r.status === 'pending' ? (r.mode === 'cancel' ? '取消審核中' : r.mode === 'edit' ? '修改審核中' : '審核中') : s[0];
+    return '<span class="badge ' + (r.status === 'pending' ? 'warn' : s[1]) + '">' + txt + '</span>';
+  }
+  function renderApply(body) {
+    var types = [['fix', '補登打卡'], ['leave', '請假'], ['ot', '加班']];
+    body.innerHTML = '<div class="card att-form">' +
+      '<div class="att-types">' + types.map(function (t) { return '<button type="button" data-type="' + t[0] + '" class="' + (S.applyType === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      '<div id="attForm"></div></div>' +
+      '<div class="section-title">我的申請</div><div id="attMine"><div class="card empty">讀取中…</div></div>';
+    $$('[data-type]', body).forEach(function (b) {
+      b.onclick = function () { S.applyType = b.dataset.type; S.edit = null; S.prefill = null; renderApply(body); };
+    });
+    var f = $('#attForm', body);
+    if (S.applyType === 'fix') fixForm(f);
+    if (S.applyType === 'leave') leaveForm(f);
+    if (S.applyType === 'ot') otForm(f);
+    loadMine();
+  }
+  function afterSave(res) {
+    BM.toast(res.status === 'approved' ? '已送出並生效' : '已送出');
+    S.edit = null; S.prefill = null;
+    ['reqs', 'bal'].forEach(function (k) { BM.cache(key(k), null); });
+    BM.cache(key('m_me_' + (S.ym || BM.today().slice(0, 7))), null);
+    renderApply($('#attBody'));
+  }
+  function editNote() { return S.edit ? '<div class="att-editing">修改：' + esc(S.edit.summary) + ' <button type="button" class="link-btn" id="edCancel">取消修改</button></div>' : ''; }
+  function bindEditCancel(el) { if ($('#edCancel', el)) $('#edCancel', el).onclick = function () { S.edit = null; renderApply($('#attBody')); }; }
+
+  function fixForm(el) {
+    var d = S.prefill || (S.edit ? (function (x) {
+      var o = { date: x.date, inTime: x.inTime || (x.kind === 'in' ? x.time : ''), outTime: x.outTime || (x.kind === 'out' ? x.time : ''), reason: x.reason };
+      o.useIn = !!o.inTime; o.useOut = !!o.outTime; return o;
+    })(S.edit.pendingData || S.edit.data) : { date: BM.today(), useIn: false, useOut: false });
+    el.innerHTML = editNote() +
+      '<label class="f" for="fxDate">日期</label><input class="input" id="fxDate" type="date" max="' + BM.today() + '" value="' + esc(d.date || BM.today()) + '" style="max-width:260px">' +
+      punchRow('In', '上班', d.useIn, d.inTime) + punchRow('Out', '下班', d.useOut, d.outTime) +
+      '<label class="f" for="fxReason">原因</label><input class="input" id="fxReason" maxlength="200" value="' + esc(d.reason || '') + '">' +
+      '<div class="btn-row" style="justify-content:flex-end"><button class="btn" id="fxOk">送出</button></div>';
+    bindEditCancel(el);
+    ['In', 'Out'].forEach(function (k) {
+      var c = $('#fxUse' + k, el), t = $('#fxTime' + k, el);
+      c.onchange = function () { t.disabled = !c.checked; if (c.checked) t.focus(); };
+    });
+    $('#fxOk', el).onclick = async function () {
+      var data = { date: $('#fxDate', el).value, inTime: $('#fxUseIn', el).checked ? $('#fxTimeIn', el).value : '', outTime: $('#fxUseOut', el).checked ? $('#fxTimeOut', el).value : '', reason: $('#fxReason', el).value.trim() };
+      if (!data.inTime && !data.outTime) return BM.toast('請勾選上班或下班並填寫時間', true);
+      if (!data.reason) return BM.toast('請填寫原因', true);
+      afterSave(await api('attSaveFix', { id: S.edit ? S.edit.id : '', data: data }));
+    };
+  }
+  function punchRow(k, label, on, time) {
+    return '<div class="att-prow"><label class="chk' + (on ? ' on' : '') + '"><input type="checkbox" id="fxUse' + k + '"' + (on ? ' checked' : '') + '>' + label + '</label>' +
+      '<input class="input" id="fxTime' + k + '" type="time" value="' + esc(time || '') + '"' + (on ? '' : ' disabled') + '></div>';
+  }
+
+  // 請假：時間用 30 分鐘一格的選單；選了假別就顯示剩餘
+  function timeOptions(sel) {
+    var out = '';
+    for (var m = 9 * 60; m <= 18 * 60; m += 30) { var v = ATT.fmtMin(m); out += '<option' + (v === sel ? ' selected' : '') + '>' + v + '</option>'; }
+    return out;
+  }
+  async function leaveForm(el) {
+    el.innerHTML = '<div class="card empty" style="border:0">讀取中…</div>';
+    var b = BM.cached(key('bal'));
+    if (!b) { b = await api('attBalances', {}); BM.cache(key('bal'), b); }
+    if (!alive()) return;
+    var d = S.edit ? (S.edit.pendingData || S.edit.data) : { leaveType: 'annual', fromDate: BM.today(), toDate: BM.today(), fromTime: '09:00', toTime: '18:00' };
+    var bal = {};
+    b.balances.forEach(function (x) { bal[x.key] = x; });
+    el.innerHTML = editNote() +
+      '<div class="row2"><div><label class="f" for="lvType">假別</label><select class="input" id="lvType">' + b.types.types.map(function (t) {
+        return '<option value="' + t.key + '"' + (t.key === d.leaveType ? ' selected' : '') + '>' + esc(t.name) + (bal[t.key] && bal[t.key].label ? '（' + esc(bal[t.key].label) + '）' : '') + '</option>';
+      }).join('') + '</select>' +
+      '<div id="lvRelWrap" hidden><label class="f" for="lvRel">親屬關係</label><select class="input" id="lvRel">' + b.types.funeral.map(function (f) {
+        return '<option value="' + f.key + '"' + (f.key === d.relation ? ' selected' : '') + '>' + esc(f.name) + '（' + f.days + ' 天）</option>';
+      }).join('') + '</select></div></div>' +
+      '<div><label class="f">剩餘</label><div class="att-bal" id="lvBal"></div></div></div>' +
+      '<div class="row2"><div><label class="f" for="lvFromD">開始</label><div class="att-dt"><input class="input" type="date" id="lvFromD" value="' + esc(d.fromDate) + '"><select class="input" id="lvFromT">' + timeOptions(d.fromTime) + '</select></div></div>' +
+      '<div><label class="f" for="lvToD">結束</label><div class="att-dt"><input class="input" type="date" id="lvToD" value="' + esc(d.toDate) + '"><select class="input" id="lvToT">' + timeOptions(d.toTime) + '</select></div></div></div>' +
+      '<label class="f">共</label><div class="att-total" id="lvTotal"></div>' +
+      '<label class="f" for="lvReason">原因</label><input class="input" id="lvReason" maxlength="200" value="' + esc(d.reason || '') + '">' +
+      '<div class="btn-row" style="justify-content:flex-end"><button class="btn" id="lvOk">送出</button></div>';
+    bindEditCancel(el);
+    var upd = function () {
+      var t = $('#lvType', el).value, x = bal[t];
+      $('#lvRelWrap', el).hidden = t !== 'funeral';
+      $('#lvBal', el).innerHTML = x && x.remaining !== null ? '<b>' + esc(ATT.fmtDays(x.remaining)) + '</b>' + (x.unit === 'month' ? '<span>本月</span>' : '') : '<span class="muted">—</span>';
+      var fd = $('#lvFromD', el).value, td = $('#lvToD', el).value;
+      if (td < fd) { $('#lvToD', el).value = fd; td = fd; }
+      var mins = fd && td ? ATT.leaveMinutes(fd, $('#lvFromT', el).value, td, $('#lvToT', el).value, function (dd) { var w = ATT.weekday(dd); return w !== 0 && w !== 6; }) : 0;
+      $('#lvTotal', el).textContent = ATT.fmtDays(mins);
+    };
+    ['lvType', 'lvFromD', 'lvFromT', 'lvToD', 'lvToT'].forEach(function (id) { $('#' + id, el).onchange = upd; });
+    upd();
+    $('#lvOk', el).onclick = async function () {
+      var data = { leaveType: $('#lvType', el).value, relation: $('#lvRel', el).value, fromDate: $('#lvFromD', el).value, fromTime: $('#lvFromT', el).value,
+        toDate: $('#lvToD', el).value, toTime: $('#lvToT', el).value, reason: $('#lvReason', el).value.trim() };
+      afterSave(await api('attSaveLeave', { id: S.edit ? S.edit.id : '', data: data }));
+    };
+  }
+
+  // 加班：選日期後帶出當天打卡，預設從應下班時間到下班卡
+  function otForm(el) {
+    var d = S.edit ? (S.edit.pendingData || S.edit.data) : { date: BM.today(), comp: true };
+    el.innerHTML = editNote() +
+      '<div class="row2"><div><label class="f" for="otDate">日期</label><input class="input" id="otDate" type="date" max="' + BM.today() + '" value="' + esc(d.date) + '"></div>' +
+      '<div><label class="f">當天打卡</label><div class="input att-ro" id="otPunch">—</div></div></div>' +
+      '<div class="row2"><div><label class="f" for="otFrom">開始</label><input class="input" id="otFrom" type="time" value="' + esc(d.from || '') + '"></div>' +
+      '<div><label class="f" for="otTo">結束</label><input class="input" id="otTo" type="time" value="' + esc(d.to || '') + '"></div></div>' +
+      '<div class="row2"><div><label class="f">共</label><div class="att-total" id="otTotal">—</div></div>' +
+      '<div><label class="f">換成</label><div class="att-seg"><button type="button" data-comp="1" class="' + (d.comp ? 'on' : '') + '">補休</button><button type="button" data-comp="0" class="' + (d.comp ? '' : 'on') + '">加班費</button></div></div></div>' +
+      '<div class="btn-row" style="justify-content:flex-end"><button class="btn" id="otOk">送出</button></div>';
+    bindEditCancel(el);
+    var comp = !!d.comp;
+    $$('[data-comp]', el).forEach(function (b) {
+      b.onclick = function () { comp = b.dataset.comp === '1'; $$('[data-comp]', el).forEach(function (x) { x.classList.toggle('on', x === b); }); };
+    });
+    var day = null;
+    var calc = function () {
+      var a = ATT.toMin($('#otFrom', el).value), b2 = ATT.toMin($('#otTo', el).value);
+      var mins = a !== null && b2 !== null && b2 > a ? b2 - a : 0;
+      if (day && !day.workday && mins) mins -= Math.max(0, Math.min(b2, 810) - Math.max(a, 750));
+      $('#otTotal', el).textContent = mins ? ATT.fmtDur(mins) : '—';
+    };
+    var loadDay = async function (fill) {
+      var date = $('#otDate', el).value;
+      if (!date) return;
+      var ym = date.slice(0, 7), k = key('m_me_' + ym);
+      var m = BM.cached(k) || await api('attMonth', { ym: ym }, { silent: true });
+      BM.cache(k, m);
+      day = m.days.filter(function (x) { return x.date === date; })[0] || null;
+      $('#otPunch', el).textContent = day && (day.inTime || day.outTime) ? (day.inTime || '—') + ' → ' + (day.outTime || '—') : '—';
+      if (fill && day && day.outTime) {
+        $('#otFrom', el).value = day.workday ? day.expectedOut : day.inTime;
+        $('#otTo', el).value = day.outTime;
+      }
+      calc();
+    };
+    $('#otDate', el).onchange = function () { loadDay(true); };
+    $('#otFrom', el).onchange = calc; $('#otTo', el).onchange = calc;
+    loadDay(!S.edit);
+    $('#otOk', el).onclick = async function () {
+      var data = { date: $('#otDate', el).value, from: $('#otFrom', el).value, to: $('#otTo', el).value, comp: comp };
+      afterSave(await api('attSaveOt', { id: S.edit ? S.edit.id : '', data: data }));
+    };
+  }
+
+  function loadMine() {
+    var draw = function (list) {
+      var box = $('#attMine');
+      if (!box) return;
+      box.innerHTML = list.length ? '<div class="card">' + list.slice(0, 50).map(function (r) {
+        return '<a href="#" class="att-req-row" data-req="' + esc(r.id) + '"><span class="grow">' + esc(r.title) + '・' + esc(r.summary) + '</span>' + statusChip(r) + '</a>';
+      }).join('') + '</div>' : '<div class="card empty">—</div>';
+      $$('[data-req]', box).forEach(function (a) {
+        a.onclick = function (e) { e.preventDefault(); openReq(list.filter(function (r) { return r.id === a.dataset.req; })[0]); };
+      });
+    };
+    BM.swr(key('reqs'), function () { return BM.api('attMyReqs', { token: token() }); }, draw);
   }
   function historyHtml(r) {
-    return '<div class="att-hist">' + r.history.map(function (h) {
+    return '<div class="att-hist">' + (r.history || []).map(function (h) {
       return '<div><span class="muted">' + esc(String(h.t).slice(5, 16).replace('T', ' ').replace('-', '/')) + '</span> ' + esc(h.by) + ' ' +
         esc(ACT[h.act] || h.act) + (h.note ? '：' + esc(h.note) : '') + '</div>';
     }).join('') + '</div>';
   }
+  // 申請單內容：自己的可以修改、取消；審核人可以核准、退件
+  function openReq(r, onDone) {
+    if (!r) return;
+    var canEdit = r.mine && r.status !== 'cancelled' && r.mode !== 'cancel';
+    var canCancel = r.mine && ['pending', 'approved', 'rejected'].indexOf(r.status) >= 0 && r.mode !== 'cancel';
+    var m = BM.modal('<h2>' + esc((r.mine ? '' : r.staff + '・') + r.title) + ' ' + statusChip(r) + '</h2>' +
+      '<div class="att-req-main">' + esc(r.summary) + '</div>' +
+      ((r.pendingData || r.data || {}).reason ? '<div class="small muted">' + esc((r.pendingData || r.data).reason) + '</div>' : '') +
+      historyHtml(r) +
+      (r.canDecide ? '<label class="f" for="rqNote">備註</label><input class="input" id="rqNote" maxlength="200">' +
+        '<div class="btn-row"><button class="btn danger" id="rqNo">退件</button><button class="btn" id="rqOk">核准</button></div>' :
+        (canEdit || canCancel ? '<div class="btn-row">' + (canCancel ? '<button class="btn ghost" id="rqCancel">' + (r.mode === 'edit' ? '撤回修改' : '取消申請') + '</button>' : '') +
+          (canEdit ? '<button class="btn" id="rqEdit">修改</button>' : '') + '</div>' : '')));
+    var el = m.el;
+    var done = function () { BM.cache(key('reqs'), null); BM.cache(key('bal'), null); m.close(); if (onDone) onDone(); else if (S.tab === 'apply' && alive()) renderApply($('#attBody')); };
+    if ($('#rqEdit', el)) $('#rqEdit', el).onclick = function () { m.close(); S.edit = r; S.applyType = r.type; S.prefill = null; if (S.tab === 'apply' && alive()) renderApply($('#attBody')); else BM.go('attendance/apply'); };
+    if ($('#rqCancel', el)) $('#rqCancel', el).onclick = async function () {
+      if (!await BM.ask(r.mode === 'edit' ? '撤回這次修改？' : '取消這張申請？')) return;
+      await api('attCancel', { id: r.id }); BM.toast('已送出'); done();
+    };
+    if ($('#rqOk', el)) $('#rqOk', el).onclick = async function () {
+      await api('attDecide', { id: r.id, approve: true, note: $('#rqNote', el).value.trim() }); BM.toast('已核准'); done();
+    };
+    if ($('#rqNo', el)) $('#rqNo', el).onclick = async function () {
+      var note = $('#rqNote', el).value.trim();
+      if (!note) return BM.toast('請在備註填寫退件原因', true);
+      await api('attDecide', { id: r.id, approve: false, note: note }); BM.toast('已退件'); done();
+    };
+  }
+  // 從首頁或「待我審核」直接打開某一張申請單
+  async function openReqById(id, onDone) {
+    var r = await api('attReq', { id: id });
+    openReq(r, onDone);
+  }
+
+  // ======================= 工作日曆（HR） =======================
+  async function renderCalendar(body) {
+    if (!S.calYm) S.calYm = BM.today().slice(0, 7);
+    var y = S.calYm.slice(0, 4);
+    var k = key('cal_' + y);
+    var draw = function (c) {
+      if (!alive() || S.tab !== 'calendar') return;
+      var days = ATT.monthDays(S.calYm), first = ATT.weekday(days[0]);
+      var cells = [];
+      for (var i = 0; i < first; i++) cells.push('<div class="cal-d empty"></div>');
+      days.forEach(function (d) {
+        var ov = c.overrides.filter(function (o) { return o.date === d; });
+        var g = c.days[d], w = ATT.weekday(d);
+        var cls = 'cal-d', label = '';
+        if (ov.length) { cls += ov.some(function (o) { return o.off; }) ? ' ty' : ' work'; label = ov.map(function (o) { return o.note + (o.region === '全' ? '' : '（' + o.region + '）'); }).join('、'); }
+        else if (g) { cls += g.off ? ' hol' : ' work'; label = g.name; }
+        else if (w === 0 || w === 6) cls += ' off';
+        cells.push('<button type="button" class="' + cls + '" data-day="' + d + '"><b>' + Number(d.slice(8)) + '</b>' + (label ? '<small>' + esc(label) + '</small>' : '') + '</button>');
+      });
+      body.innerHTML = '<div class="att-month-bar"><button class="btn small ghost" id="cPrev">‹</button><b>' + S.calYm.replace('-', ' 年 ') + ' 月</b>' +
+        '<button class="btn small ghost" id="cNext">›</button></div>' +
+        '<div class="card"><div class="cal-grid">' + '日一二三四五六'.split('').map(function (x) { return '<div class="cal-h">' + x + '</div>'; }).join('') + cells.join('') + '</div></div>';
+      $('#cPrev').onclick = function () { S.calYm = shiftYm(S.calYm, -1); renderCalendar(body); };
+      $('#cNext').onclick = function () { S.calYm = shiftYm(S.calYm, 1); renderCalendar(body); };
+      $$('[data-day]', body).forEach(function (b) { b.onclick = function () { openDay(b.dataset.day, c, body); }; });
+    };
+    if (!BM.cached(k)) body.innerHTML = '<div class="card empty">讀取中…</div>';
+    BM.swr(k, function () { return BM.api('attCalendar', { token: token(), year: y }); }, draw);
+  }
+  function openDay(d, c, body) {
+    var ov = c.overrides.filter(function (o) { return o.date === d; });
+    var m = BM.modal('<h2>' + BM.fmtDate(d) + '</h2>' +
+      (c.days[d] ? '<p class="small muted" style="margin:0">' + esc(c.days[d].name) + '</p>' : '') +
+      (ov.length ? '<div class="card" style="margin-top:10px">' + ov.map(function (o) {
+        return '<div class="att-row"><span class="grow">' + (o.region === '全' ? '全部' : o.region + '區') + '・' + (o.off ? '停班' : '上班') + '・' + esc(o.note) + '</span>' +
+          '<button class="btn small danger" data-rm="' + esc(o.id) + '">取消</button></div>';
+      }).join('') + '</div>' : '') +
+      '<div class="row2"><div><label class="f" for="oRegion">地區</label><select class="input" id="oRegion"><option value="全">全部</option><option value="北">北區</option><option value="中">中區</option><option value="南">南區</option></select></div>' +
+      '<div><label class="f">這一天</label><div class="att-seg"><button type="button" class="on" data-off="1">停班</button><button type="button" data-off="0">上班</button></div></div></div>' +
+      '<label class="f" for="oNote">說明</label><input class="input" id="oNote" maxlength="30">' +
+      '<div class="btn-row"><button class="btn block" id="oSave">儲存</button></div>');
+    var el = m.el, off = true;
+    $$('[data-off]', el).forEach(function (b) { b.onclick = function () { off = b.dataset.off === '1'; $$('[data-off]', el).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
+    var after = function (res) { BM.cache(key('cal_' + d.slice(0, 4)), res); m.close(); renderCalendar(body); };
+    $('#oSave', el).onclick = async function () {
+      var note = $('#oNote', el).value.trim();
+      if (!note) return BM.toast('請填寫說明', true);
+      after(await api('attCalSave', { year: d.slice(0, 4), override: { date: d, region: $('#oRegion', el).value, off: off, note: note } }));
+    };
+    $$('[data-rm]', el).forEach(function (b) { b.onclick = async function () { after(await api('attCalRemove', { year: d.slice(0, 4), id: b.dataset.rm })); }; });
+  }
+
+  // ======================= 給首頁和「待我審核」用 =======================
   function reqCard(r, opts) {
     opts = opts || {};
-    var d = r.data || {};
-    var nd = r.pendingData;
-    var canEdit = r.mine && r.status !== 'cancelled' && r.mode !== 'cancel';
-    var canCancel = r.mine && (r.status === 'pending' || r.status === 'approved' || r.status === 'rejected') && r.mode !== 'cancel';
-    return '<div class="card att-req" data-id="' + esc(r.id) + '">' +
-      '<div class="rec-head"><b>' + esc((opts.who ? r.staff + '・' : '') + r.typeLabel) + '</b>' + statusBadge(r) + '</div>' +
-      '<div class="att-req-main">' + esc(r.summary) + (nd ? '　<span class="small muted">原本：' + esc(d.date.slice(5).replace('-', '/') + ' ' + d.time) + '</span>' : '') + '</div>' +
-      '<div class="small muted">原因：' + esc((nd || d).reason || '') + '</div>' +
-      '<details><summary class="small muted">審核歷程</summary>' + historyHtml(r) + '</details>' +
-      (opts.decide && r.canDecide ? '<div class="btn-row"><button class="btn small" data-ok>核准</button><button class="btn small danger" data-no>退件</button></div>' :
-        (canEdit || canCancel) && !opts.decide ? '<div class="btn-row">' + (canEdit ? '<button class="btn small ghost" data-edit>修改</button>' : '') +
-        (canCancel ? '<button class="btn small ghost" data-cancel>' + (r.mode === 'edit' ? '撤回修改' : '取消申請') + '</button>' : '') + '</div>' : '') +
-      '</div>';
-  }
-  function renderFix(body) {
-    var draw = function (list) {
-      if (!alive() || S.tab !== 'fix') return;
-      var fixes = list.filter(function (r) { return r.type === 'fix'; });
-      body.innerHTML = '<div class="btn-row" style="margin:0 0 12px"><button class="btn" id="fNew">＋ 申請補登打卡</button></div>' +
-        '<p class="small muted" style="margin:0 4px 12px">忘了打卡時填寫，經 HR 和主管核准後才會算進出勤紀錄。HR 核准前可以自己修改或取消；核准後要修改或取消，只需要 HR 再審一次。</p>' +
-        (fixes.length ? fixes.map(function (r) { return reqCard(r); }).join('') : '<div class="card empty">還沒有補登申請</div>');
-      $('#fNew').onclick = function () { openFixForm(null, null); };
-      bindReqActions(body, fixes, function () { renderFix(body); });
-    };
-    var c = BM.cached(key('reqs'));
-    if (!c) body.innerHTML = '<div class="card empty">讀取中…</div>';
-    BM.swr(key('reqs'), function () { return BM.api('attMyReqs', { token: token() }); }, draw);
-  }
-  function bindReqActions(root, list, refresh) {
-    $$('.att-req', root).forEach(function (el) {
-      var r = list.filter(function (x) { return x.id === el.dataset.id; })[0];
-      if (!r) return;
-      if ($('[data-edit]', el)) $('[data-edit]', el).onclick = function () { openFixForm(r, r.pendingData || r.data); };
-      if ($('[data-cancel]', el)) $('[data-cancel]', el).onclick = async function () {
-        var msg = r.mode === 'edit' ? '撤回這次修改，維持原本已核准的內容？' :
-          r.status === 'approved' || r.hrOk ? '申請取消這張補登？HR 核准後才會取消。' : '確定取消這張補登申請？';
-        if (!await BM.ask(msg)) return;
-        await api('attCancel', { id: r.id });
-        BM.toast('已送出');
-        BM.cache(key('reqs'), null);
-        refresh();
-      };
-    });
-  }
-  function openFixForm(r, d) {
-    d = d || {};
-    var today = BM.today();
-    var m = BM.modal('<h2>' + (r ? '修改補登打卡' : '申請補登打卡') + '</h2>' +
-      (r && (r.status === 'approved' || r.hrOk) ? '<p class="small muted" style="margin:0">這張已經過 HR 核准，修改後要再由 HR 審一次。</p>' : '') +
-      '<label class="f" for="fxDate">日期</label><input class="input" id="fxDate" type="date" max="' + today + '" value="' + esc(d.date || today) + '">' +
-      '<label class="f">補登哪一張卡</label><div class="choice">' +
-      [['in', '上班卡'], ['out', '下班卡']].map(function (o) {
-        var on = (d.kind || 'in') === o[0];
-        return '<label class="chk' + (on ? ' on' : '') + '"><input type="radio" name="fxKind" value="' + o[0] + '"' + (on ? ' checked' : '') + '>' + o[1] + '</label>';
-      }).join('') + '</div>' +
-      '<label class="f" for="fxTime">實際時間</label><input class="input" id="fxTime" type="time" value="' + esc(d.time || '') + '">' +
-      '<label class="f" for="fxReason">原因</label><input class="input" id="fxReason" maxlength="200" placeholder="例如：忘記打卡、外出拜訪客戶" value="' + esc(d.reason || '') + '">' +
-      '<div class="btn-row"><button class="btn block" id="fxOk">送出</button></div>');
-    var el = m.el;
-    $$('input[name=fxKind]', el).forEach(function (x) {
-      x.onchange = function () { $$('input[name=fxKind]', el).forEach(function (y) { y.parentElement.classList.toggle('on', y.checked); }); };
-    });
-    $('#fxOk', el).onclick = async function () {
-      var k = $('input[name=fxKind]:checked', el);
-      var data = { date: $('#fxDate', el).value, kind: k ? k.value : 'in', time: $('#fxTime', el).value, reason: $('#fxReason', el).value.trim() };
-      if (!data.date) return BM.toast('請選擇日期', true);
-      if (!data.time) return BM.toast('請填寫時間', true);
-      if (!data.reason) return BM.toast('請填寫原因', true);
-      var res = await api('attSaveFix', { id: r ? r.id : '', data: data });
-      m.close();
-      BM.toast(res.status === 'approved' ? '已生效' : '已送出，等待 ' + (res.waitingFor || '審核'));
-      BM.cache(key('reqs'), null);
-      BM.cache(key('today'), null);
-      if (S.tab === 'fix') renderFix($('#attBody')); else BM.go('attendance/fix');
-    };
+    return '<div class="card att-req" data-id="' + esc(r.id) + '"><div class="rec-head"><b>' + esc((opts.who ? r.staff + '・' : '') + r.title) + '</b>' + statusChip(r) + '</div>' +
+      '<div class="att-req-main">' + esc(r.summary) + '</div>' +
+      (opts.decide && r.canDecide ? '<div class="btn-row"><button class="btn small" data-ok>核准</button><button class="btn small danger" data-no>退件</button></div>' : '') + '</div>';
   }
 
-  // ---------------- 全員出勤（HR 另外有「本月異常清單」） ----------------
-  function renderTeam(body) {
-    if (S.teamMode === 'abnormal' && S.me.role === 'admin') return renderAbnormal(body);
-    if (!S.teamDate) S.teamDate = BM.today();
-    var k = key('team_' + S.teamDate);
-    var draw = function (t) {
-      if (!alive() || S.tab !== 'team') return;
-      BM.cache(key('staffList'), t.staffList);
-      var ppl = t.people;
-      var cnt = function (f) { return ppl.filter(f).length; };
-      var isToday = t.date === BM.today();
-      body.innerHTML = teamModeBar() + '<div class="att-month-bar"><button class="btn small ghost" id="tPrev" aria-label="前一天">‹</button>' +
-        '<input class="input mini" type="date" id="tDate" max="' + BM.today() + '" value="' + t.date + '">' +
-        '<button class="btn small ghost" id="tNext" aria-label="後一天"' + (isToday ? ' disabled' : '') + '>›</button></div>' +
-        '<div class="att-sum">' + sumCell('已上班', cnt(function (d) { return d.inTime; })) +
-        sumCell(isToday ? '還沒打卡' : '未打卡', cnt(function (d) { return d.workday && !d.inTime && !d.outTime; }), 1) +
-        sumCell('正常', cnt(function (d) { return d.status === 'ok'; })) + sumCell('異常', cnt(function (d) { return d.status === 'abnormal'; }), 1) + '</div>' +
-        '<div class="card" style="padding:0;overflow:auto"><table class="grid"><thead><tr><th>姓名</th><th>區</th><th>上班</th><th>下班</th><th>狀態</th></tr></thead><tbody>' +
-        ppl.map(function (d) {
-          return '<tr><td><a href="#" data-who="' + esc(d.staffId) + '">' + esc(d.staff) + '</a></td><td>' + esc(d.region || '') + '</td>' +
-            '<td>' + (d.inTime || '—') + (d.inFix ? '*' : '') + '</td><td>' + (d.outTime || '—') + (d.outFix ? '*' : '') + '</td>' +
-            '<td>' + dayBadge(d, t.detail) + '</td></tr>';
-        }).join('') + '</tbody></table></div><p class="small muted">＊＝補登的打卡。點姓名可以看那個人整個月的紀錄。</p>';
-      bindTeamMode(body);
-      $('#tPrev').onclick = function () { S.teamDate = ATT.addDays(S.teamDate, -1); renderTeam(body); };
-      $('#tNext').onclick = function () { S.teamDate = ATT.addDays(S.teamDate, 1); renderTeam(body); };
-      $('#tDate').onchange = function () { if (this.value) { S.teamDate = this.value; renderTeam(body); } };
-      $$('[data-who]', body).forEach(function (a) {
-        a.onclick = function (e) { e.preventDefault(); S.viewId = a.dataset.who === myId(ppl) ? '' : a.dataset.who; S.ym = S.teamDate.slice(0, 7); BM.go('attendance/records'); };
-      });
-    };
-    var c = BM.cached(k);
-    if (!c) body.innerHTML = '<div class="card empty">讀取中…</div>';
-    BM.swr(k, function () { return BM.api('attTeam', { token: token(), date: S.teamDate }); }, draw);
-  }
-  function myId(ppl) { var m = ppl.filter(function (p) { return p.staff === S.me.name; })[0]; return m ? m.staffId : ''; }
-  // HR 才有的切換：「每日出勤」／「本月異常清單」
-  function teamModeBar() {
-    if (S.me.role !== 'admin') return '';
-    var cur = S.teamMode === 'abnormal' ? 'abnormal' : 'day';
-    return '<div class="choice att-mode">' + [['day', '每日出勤'], ['abnormal', '異常清單']].map(function (o) {
-      return '<button type="button" class="chk' + (o[0] === cur ? ' on' : '') + '" data-mode="' + o[0] + '">' + o[1] + '</button>';
-    }).join('') + '</div>';
-  }
-  function bindTeamMode(body) {
-    $$('[data-mode]', body).forEach(function (b) { b.onclick = function () { S.teamMode = b.dataset.mode; renderTeam(body); }; });
-  }
-  function renderAbnormal(body) {
-    if (!S.abYm) S.abYm = BM.today().slice(0, 7);
-    var k = key('ab_' + S.abYm);
-    var draw = function (a) {
-      if (!alive() || S.tab !== 'team') return;
-      var thisMonth = S.abYm >= BM.today().slice(0, 7);
-      body.innerHTML = teamModeBar() + '<div class="att-month-bar">' +
-        '<button class="btn small ghost" id="aPrev" aria-label="上個月">‹</button><b>' + S.abYm.replace('-', ' 年 ') + ' 月</b>' +
-        '<button class="btn small ghost" id="aNext" aria-label="下個月"' + (thisMonth ? ' disabled' : '') + '>›</button>' +
-        '<span class="muted small">共 ' + a.rows.length + ' 筆異常</span></div>' +
-        (a.rows.length ? '<div class="card" style="padding:0;overflow:auto"><table class="grid"><thead><tr><th>日期</th><th>姓名</th><th>上班</th><th>下班</th><th>異常原因</th></tr></thead><tbody>' +
-          a.rows.map(function (r) {
-            return '<tr><td>' + BM.fmtDate(r.date, false) + '</td><td>' + esc(r.staff) + '</td><td>' + (r.inTime || '—') + '</td><td>' + (r.outTime || '—') + '</td>' +
-              '<td>' + esc(r.reasons.join('、')) + (r.pendingFix ? ' <span class="badge gray">補登審核中</span>' : '') + '</td></tr>';
-          }).join('') + '</tbody></table></div>' : '<div class="card empty">這個月沒有異常</div>');
-      bindTeamMode(body);
-      $('#aPrev').onclick = function () { S.abYm = shiftYm(S.abYm, -1); renderAbnormal(body); };
-      $('#aNext').onclick = function () { S.abYm = shiftYm(S.abYm, 1); renderAbnormal(body); };
-    };
-    if (!BM.cached(k)) body.innerHTML = teamModeBar() + '<div class="card empty">讀取中…</div>';
-    BM.swr(k, function () { return BM.api('attAbnormal', { token: token(), ym: S.abYm }); }, draw);
-  }
-
-  // 給首頁和「待我審核」用
   BM.modules = BM.modules || {};
   BM.modules.attendance = {
-    mount: mount,
-    init: function (me) { S.me = me; },
-    tick: tick,
-    todayCard: todayCard,
-    punchButton: punchButton,
-    doPunch: doPunch,
-    bindPunch: bindPunch,
-    reqCard: reqCard,
-    historyHtml: historyHtml
+    mount: mount, init: function (me) { S.me = me; }, tick: tick, todayCard: todayCard, punchButton: punchButton,
+    doPunch: doPunch, bindPunch: bindPunch, reqCard: reqCard, historyHtml: historyHtml, openReqById: openReqById, openReq: openReq
   };
 })();

@@ -16,7 +16,8 @@
   function alive() { return !!document.getElementById('admEvents'); } // 已切換到別的頁面就不要再畫
 
   // 掛載：tabs 是要顯示的分頁（例如只顯示人員）；tab 是一開始的分頁
-  async function mount(root, tabs, tab) {
+  async function mount(root, tabs, tab, opts) {
+    S.setMode = (opts && opts.setMode) || 'events';
     var list = ALL_TABS.filter(function (t) { return tabs.indexOf(t[0]) >= 0; });
     root.innerHTML = '<div id="admEvents"><div id="verWarn" class="notice" hidden></div>' +
       (list.length > 1 ? '<nav class="tabs sub" id="tabs">' + list.map(function (t) {
@@ -73,36 +74,54 @@
     else if (e.pushedAt) b.push('<span class="badge gray">已推播</span>');
     return b.join(' ');
   }
+  // 管理者看到的活動清單：卡片內容和一般同事一樣，下面多一列管理按鈕；草稿另外一區，已結束的收起來
   function renderEvents() {
     var today = BM.today();
-    var upcoming = D.events.filter(function (e) { return !e.dates.length || e.dates[e.dates.length - 1] >= today; }).reverse();
-    var past = D.events.filter(function (e) { return e.dates.length && e.dates[e.dates.length - 1] < today; });
+    var ended = function (e) { return e.dates.length && e.dates[e.dates.length - 1] < today; };
+    var upcoming = D.events.filter(function (e) { return !ended(e) && e.status !== 'draft'; }).reverse();
+    var drafts = D.events.filter(function (e) { return !ended(e) && e.status === 'draft'; }).reverse();
+    var past = D.events.filter(ended);
+    var meta = function (e) {
+      var rows = [['日期', e.dates.length ? BM.fmtRange(e.dates) : '待定'], ['主辦', e.host], ['地點', e.location]].filter(function (r) { return r[1]; });
+      return rows.map(function (r) { return '<div>' + r[0] + '：' + esc(r[1]) + '</div>'; }).join('');
+    };
     var card = function (e) {
-      return '<div class="card"><div class="list-item"><div class="grow">' +
-        '<b>' + esc(e.name) + '</b><div class="small muted">' + esc(BM.fmtRange(e.dates)) + (e.host ? '・' + esc(e.host) : '') +
-        '・報名 ' + e.regCount + ' 人' + (e.suggested !== '' ? '／建議 ' + e.suggested : '') + '</div>' +
-        '<div style="margin-top:4px">' + statusBadge(e) + '</div></div></div>' +
-        '<div class="btn-row">' +
-        '<button class="btn small ghost" data-act="edit" data-id="' + e.id + '">編輯</button>' +
-        '<button class="btn small ghost" data-act="regs" data-id="' + e.id + '">報名名單</button>' +
+      var more = (e.status === 'published' ? '<button data-act="draft" data-id="' + e.id + '">改回草稿</button><button data-act="cancel" data-id="' + e.id + '">取消活動</button>' : '') +
+        (e.status === 'cancelled' ? '<button data-act="publish" data-id="' + e.id + '">恢復公開</button>' : '') +
+        '<button class="d" data-act="delete" data-id="' + e.id + '">刪除</button>';
+      return '<div class="card ev-adm' + (e.status === 'draft' ? ' draft' : '') + '">' +
+        '<a href="#" class="ev-open" data-open="' + e.id + '"><b class="ev-name">' + esc(e.name) + '</b></a>' +
+        '<div class="ev-meta">' + meta(e) + '</div>' +
+        '<div class="ev-foot"><span class="small muted">已報名 ' + e.regCount + ' 人' + (e.suggested !== '' ? '／建議 ' + esc(e.suggested) + ' 人' : '') + '</span>' + statusBadge(e) + '</div>' +
+        '<div class="adm-row"><button class="btn small ghost" data-act="edit" data-id="' + e.id + '">編輯</button>' +
+        '<button class="btn small ghost" data-act="regs" data-id="' + e.id + '">報名名單（' + e.regCount + '）</button>' +
         (e.status === 'draft' ? '<button class="btn small" data-act="publish" data-id="' + e.id + '">公開</button>' : '') +
-        (e.status === 'published' ? '<button class="btn small ghost" data-act="draft" data-id="' + e.id + '">改回草稿</button>' : '') +
-        (e.status === 'published' ? '<button class="btn small danger" data-act="cancel" data-id="' + e.id + '">取消活動</button>' : '') +
-        (e.status === 'cancelled' ? '<button class="btn small ghost" data-act="publish" data-id="' + e.id + '">恢復公開</button>' : '') +
-        '<button class="btn small danger" data-act="delete" data-id="' + e.id + '">刪除</button>' +
-        '</div></div>';
+        '<span class="grow"></span><span class="more-wrap"><button class="btn small ghost" data-more>⋯ 更多</button><span class="more-pop" hidden>' + more + '</span></span></div></div>';
     };
     var box = $('#tab-events');
     box.innerHTML =
-      '<div class="btn-row" style="margin-top:0"><button class="btn" id="newEv">＋ 新增活動</button>' +
-      '<button class="btn ghost" id="pushBtn">📣 推播活動更新</button></div>' +
-      '<div class="small muted" style="margin-top:6px">推播目標：<b>' + (D.settings.pushTarget === 'main' ? '正式群組' : '測試群組') + '</b>（可在「設定」切換）</div>' +
-      '<div class="section-title">即將到來的活動</div>' + (upcoming.length ? upcoming.map(card).join('') : '<div class="card empty">尚無活動</div>') +
-      (past.length ? '<details><summary class="section-title" style="cursor:pointer">已結束的活動（' + past.length + '）</summary>' + past.map(card).join('') + '</details>' : '');
+      '<div class="adm-bar"><button class="btn" id="newEv">＋ 新增活動</button><button class="btn ghost" id="pushBtn">推播活動更新</button>' +
+      '<span class="small muted" style="margin-left:auto">推播到：<b>' + (D.settings.pushTarget === 'main' ? '正式群組' : '測試群組') + '</b></span></div>' +
+      '<div class="section-title">即將舉行</div>' + (upcoming.length ? upcoming.map(card).join('') : '<div class="card empty">尚無活動</div>') +
+      (drafts.length ? '<div class="section-title">草稿</div>' + drafts.map(card).join('') : '') +
+      (past.length ? '<details><summary class="section-title" style="cursor:pointer">已結束（' + past.length + '）</summary>' + past.map(card).join('') + '</details>' : '');
     $('#newEv').onclick = function () { openEditor(null); };
     $('#pushBtn').onclick = openPush;
     $$('[data-act]', box).forEach(function (b) {
-      b.onclick = function () { eventAction(b.dataset.act, b.dataset.id); };
+      b.onclick = function () { $$('.more-pop', box).forEach(function (p) { p.hidden = true; }); eventAction(b.dataset.act, b.dataset.id); };
+    });
+    $$('[data-more]', box).forEach(function (b) {
+      b.onclick = function (ev) {
+        ev.stopPropagation();
+        var pop = b.nextElementSibling, open = pop.hidden;
+        $$('.more-pop', box).forEach(function (p) { p.hidden = true; });
+        pop.hidden = !open;
+      };
+    });
+    document.addEventListener('click', function () { $$('.more-pop', box).forEach(function (p) { p.hidden = true; }); });
+    // 點活動名稱：打開和一般同事一樣的活動內容（可以報名）
+    $$('[data-open]', box).forEach(function (a) {
+      a.onclick = function (ev) { ev.preventDefault(); if (BM.modules.events && BM.modules.events.openEvent) BM.modules.events.openEvent(a.dataset.open); };
     });
   }
   async function eventAction(act, id) {
@@ -291,7 +310,7 @@
 
   async function openRegs(e) {
     var regs = await call('eventRegs', { eventId: e.id });
-    var active = D.staff.filter(function (s) { return s.active && s.counted; }); // 只列「列入統計」的人
+    var active = D.staff.filter(function (s) { return s.active; });
     var locked = D.settings.lockedYears;
     function has(sid, d, s) { return regs.some(function (r) { return r.staffId === sid && r.date === d && r.session === s; }); }
     function draw() {
@@ -462,7 +481,7 @@
       list.map(function (s) {
         return '<tr><td>' + esc([s.name, s.enName].filter(Boolean).join(' ')) + '</td><td>' + esc(s.region || '—') + '</td><td style="white-space:nowrap">' +
           (s.admin ? '管理員' : s.role === 'manager' ? '主管' : s.role === 'finance' ? '財務' : '職員') +
-          (!s.admin && !s.counted ? '<div class="small muted">不列入統計</div>' : '') + '</td><td>' +
+          '</td><td>' +
           (/^A\d{3}$/.test(s.id) ? '<span class="badge gray">非正式</span> ' : '') +
           (s.active ? '<span class="badge">在職</span>' : '<span class="badge gray">停用</span>') +
           (s.active && s.mustChange ? ' <span class="badge warn">尚未設定密碼</span>' : '') +
@@ -485,8 +504,8 @@
     });
   }
   function staffEditor(s) {
-    var isNew = !s;
-    s = s || { id: '', name: '', enName: '', region: '北', dept: '業務', birthday: '', active: true, note: '', role: 'staff', counted: true };
+    var isNew = !s, YEAR = String(new Date().getFullYear());
+    s = s || { id: '', name: '', enName: '', region: '北', dept: '業務', birthday: '', active: true, note: '', role: 'staff' };
     var isTemp = /^A\d{3}$/.test(s.id);
     var pwLabel = function (t) { return t ? '預設密碼（4 碼數字）' : '生日（MMDD，作為預設密碼）'; };
     var radios = function (name, opts, cur) {
@@ -496,11 +515,10 @@
       }).join('') + '</div>';
     };
     var m = BM.modal('<h2>' + (isNew ? '新增員工' : '編輯員工') + (isTemp ? ' <span class="badge gray">非正式</span>' : '') + '</h2>' +
-      (isNew ? '<label class="chk" style="margin-bottom:4px"><input type="checkbox" id="sTemp">非正式員工（員編自動編為 A 開頭三碼流水號）</label>' +
+      (isNew ? '<label class="chk" style="margin-bottom:4px"><input type="checkbox" id="sTemp">非正式員工</label>' +
         '<label class="f">員編</label><input class="input" id="sId" inputmode="numeric" value="">' : '') +
       '<label class="f">地區</label>' + radios('sReg', REG.map(function (r) { return [r, r + '區']; }), s.region) +
-      (s.admin ? '' : '<label class="f">角色</label>' + radios('sRole', [['staff', '職員'], ['manager', '主管'], ['finance', '財務']], s.role === 'manager' || s.role === 'finance' ? s.role : 'staff') +
-        '<label class="chk' + (s.counted ? ' on' : '') + '" style="margin-top:10px"><input type="checkbox" id="sCounted"' + (s.counted ? ' checked' : '') + '>列入統計（可以報名，會出現在報名名單與參加紀錄）</label>') +
+      (s.admin ? '' : '<label class="f">角色</label>' + radios('sRole', [['staff', '職員'], ['manager', '主管'], ['finance', '財務']], s.role === 'manager' || s.role === 'finance' ? s.role : 'staff')) +
       '<div class="row2"><div><label class="f">中文名' + (isTemp ? '（選填）' : '') + '</label><input class="input" id="sName" value="' + esc(s.name) + '"></div>' +
       '<div><label class="f">英文名（登入帳號）</label><input class="input" id="sEn" autocapitalize="off" value="' + esc(s.enName) + '"></div></div>' +
       '<div class="row2"><div><label class="f">部門</label><input class="input" id="sDept" value="' + esc(s.dept) + '"></div>' +
@@ -511,26 +529,27 @@
         return '<option value="' + esc(x.id) + '"' + (x.id === s.managerId ? ' selected' : '') + '>' + esc(x.enName || x.name) + '</option>';
       }).join('') + '</select></div></div>' +
       '<label class="f">備註</label><input class="input" id="sNote" value="' + esc(s.note) + '">' +
-      (isNew ? '<p class="small muted">第一次登入時，需要用預設密碼登入並重新設定。</p>' :
-        s.admin ? '<p class="small muted">這是管理員帳號，不能停用，也不列入報名統計。</p>' :
-        '<label class="chk' + (s.active ? ' on' : '') + '" style="margin-top:12px"><input type="checkbox" id="sActive"' + (s.active ? ' checked' : '') + '>在職（取消勾選＝停用，列表不再顯示）</label>') +
+      (isNew ? '' : '<div class="row2"><div><label class="f">' + YEAR + ' 特休調整（小時）</label><input class="input" id="sAdjA" type="number" step="0.5"></div>' +
+        '<div><label class="f">' + YEAR + ' 補休期初（小時）</label><input class="input" id="sAdjC" type="number" step="0.5"></div></div>') +
+      (isNew || s.admin ? '' :
+        '<label class="chk' + (s.active ? ' on' : '') + '" style="margin-top:12px"><input type="checkbox" id="sActive"' + (s.active ? ' checked' : '') + '>在職</label>') +
       '<div class="btn-row"><button class="btn" id="sSave">儲存</button></div>' +
       (isNew || s.admin ? '' : '<h3 style="margin-top:24px">密碼</h3>' +
-        '<p class="small muted" style="margin:0">「恢復預設密碼」後，員工下次登入需重新設定新密碼，也會同時解除鎖定。</p>' +
         '<div class="btn-row"><button class="btn ghost" id="sReset">恢復預設密碼（並解鎖）</button>' +
-        '<input class="input" id="sPw" placeholder="或直接指定新密碼（6–20 碼英數）" style="flex:1;min-width:160px"><button class="btn ghost" id="sSetPw">設定</button></div>'));
+        '<input class="input" id="sPw" placeholder="指定新密碼" style="flex:1;min-width:160px"><button class="btn ghost" id="sSetPw">設定</button></div>'));
     var r = m.el;
     // 按鈕式選項：點了就亮起來
     $$('input[type=radio]', r).forEach(function (x) {
       x.onchange = function () {
         $$('input[name="' + x.name + '"]', r).forEach(function (y) { y.parentElement.classList.toggle('on', y.checked); });
-        if (x.name === 'sRole' && $('#sCounted', r)) { // 換角色時帶入預設：職員列入、主管不列入
-          $('#sCounted', r).checked = x.value === 'staff';
-          $('#sCounted', r).parentElement.classList.toggle('on', x.value === 'staff');
-        }
       };
     });
-    if ($('#sCounted', r)) $('#sCounted', r).onchange = function () { this.parentElement.classList.toggle('on', this.checked); };
+    var adj0 = null;
+    if (!isNew) call('attAdjust', { staffId: s.id, year: YEAR }).then(function (a) {
+      adj0 = a || {};
+      if ($('#sAdjA', r)) $('#sAdjA', r).value = adj0.annual ? adj0.annual / 60 : '';
+      if ($('#sAdjC', r)) $('#sAdjC', r).value = adj0.comp ? adj0.comp / 60 : '';
+    }).catch(function () { });
     var picked = function (name) { var x = $('input[name="' + name + '"]:checked', r); return x ? x.value : ''; };
     var tempBox = $('#sTemp', r);
     if (tempBox) tempBox.onchange = function () {
@@ -546,9 +565,13 @@
       var st = { id: isNew ? (temp ? '' : $('#sId', r).value.trim()) : s.id, temp: temp, name: $('#sName', r).value.trim(), enName: $('#sEn', r).value.trim(), region: picked('sReg'),
         dept: $('#sDept', r).value.trim(), birthday: $('#sBday', r).value.trim(), note: $('#sNote', r).value.trim(),
         active: isNew || s.admin ? true : $('#sActive', r).checked, hireDate: $('#sHire', r).value, managerId: $('#sMgr', r).value };
-      if (!s.admin) { st.role = picked('sRole'); st.counted = $('#sCounted', r).checked; }
+      if (!s.admin) st.role = picked('sRole');
       if (!st.region) return BM.toast('請選擇地區', true);
       D = await call('saveStaff', { staff: st });
+      if (!isNew && adj0) {
+        var hA = Math.round((Number($('#sAdjA', r).value) || 0) * 60), hC = Math.round((Number($('#sAdjC', r).value) || 0) * 60);
+        if (hA !== (adj0.annual || 0) || hC !== (adj0.comp || 0)) await call('attAdjust', { staffId: s.id, year: YEAR, annual: hA, comp: hC });
+      }
       BM.toast('已儲存');
       m.close();
       render();
@@ -583,66 +606,41 @@
     var fbOpen = D.feedback.filter(function (f) { return f.status === 'new'; }).length;
     var fbSched = D.feedback.filter(function (f) { return f.status === 'scheduled'; }).length;
 
-    box.innerHTML =
-      '<details class="card set-sec" data-sec="line"><summary class="set-sum">LINE 推播</summary>' +
-      '<div class="small">' + (st.lineTokenSet ? '✅ LINE Token' : '❌ 尚未設定 LINE Token') + '　' + (st.adminBound ? '✅ 已綁定管理員 LINE' : '❌ 尚未綁定（在 LINE 私訊官方帳號「綁定 你的登入密碼」）') + '</div>' +
-      '<label class="f">推播目標（點一下就切換）</label><div class="btn-row" style="margin-top:0">' +
-      '<button class="btn ' + (target === 'test' ? '' : 'ghost') + '" data-pt="test">' + (target === 'test' ? '✓ ' : '') + '測試群組</button>' +
-      '<button class="btn ' + (target === 'main' ? '' : 'ghost') + '" data-pt="main">' + (target === 'main' ? '✓ ' : '') + '正式群組</button></div>' +
-      '<div class="small" style="margin-top:8px">測試群組 ' + (st.testGroupId ? '✅ 已設定' : '❌ 未設定') + '　正式群組 ' + (st.mainGroupId ? '✅ 已設定' : '❌ 未設定') + '</div>' +
-      '<details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">變更群組 ID</summary>' +
-      '<label class="f">測試群組 ID</label><input class="input" id="tg" value="' + esc(st.testGroupId) + '">' +
-      '<label class="f">正式群組 ID</label><input class="input" id="mg" value="' + esc(st.mainGroupId) + '">' +
-      '<p class="small muted">也可以在群組裡輸入「設為測試群組」或「設為正式群組」自動設定。</p>' +
-      '<div class="btn-row"><button class="btn small ghost" id="saveGroups">儲存群組 ID</button></div></details>' +
-      (st.richMenuErr ? '<div class="notice">LINE 選單尚未更新：' + esc(st.richMenuErr) + '<br>上傳最新網頁後，到最下面「進階」按「重新建立 LINE 選單」。</div>' : '') +
-      '</details>' +
-
-      '<details class="card set-sec" data-sec="perm"><summary class="set-sum">頁面權限</summary>' +
-      '<p class="small muted" style="margin:0 0 6px">勾選或取消就會立即儲存。管理員永遠可以看全部。</p>' +
-      '<table class="grid perm-table"><thead><tr><th>頁面</th><th>主管</th><th>職員</th></tr></thead><tbody>' +
-      PAGES.map(function (p) {
-        return '<tr><td>' + p[1] + (p[2] ? '<div class="small muted">' + p[2] + '</div>' : '') + '</td>' +
-          ['manager', 'staff'].map(function (r) {
-            return '<td><input type="checkbox" style="width:22px;height:22px;accent-color:var(--brand)" data-perm="' + r + '|' + p[0] + '"' + (D.perms[r][p[0]] ? ' checked' : '') + '></td>';
-          }).join('') + '</tr>';
-      }).join('') + '</tbody></table>' +
-      '<p class="small muted">「列入統計」在「員工 → 編輯」裡逐一設定：有勾的人可以報名，也會出現在報名名單與參加紀錄。</p></details>' +
-
-      '<details class="card set-sec" data-sec="lock"><summary class="set-sum">年度鎖定</summary>' +
-      '<p class="small muted" style="margin:0 0 8px">點年份就會切換鎖定／解鎖。鎖定後該年的報名與修正都不能再改。</p>' +
-      BM.yearChips('', { noNext: true, label: function (yy) { return (st.lockedYears.indexOf(yy) >= 0 ? '🔒 ' : '🔓 ') + yy; } })
-        .replace('class="year-chips"', 'class="year-chips" id="lockChips"') +
-      '<p class="small muted">每年 1/11 13:00 會自動鎖定去年（若還有待審核申請，會每小時提醒並延後鎖定）。</p></details>' +
-
-      '<details class="card set-sec" data-sec="backup"><summary class="set-sum">年度紀錄備份</summary>' +
-      '<div class="small">' + (st.backupSpreadsheetId ? '✅ 已設定　<a href="https://docs.google.com/spreadsheets/d/' + esc(st.backupSpreadsheetId) + '" target="_blank" rel="noopener">開啟備份試算表</a>' : '❌ 尚未設定（第一次備份時會自動建立）') + '</div>' +
-      '<label class="f">立即備份（點年份）</label>' +
-      BM.yearChips('', { noNext: true }).replace('class="year-chips"', 'class="year-chips" id="bkChips"') +
-      '<details style="margin-top:8px"><summary class="small muted" style="cursor:pointer">變更備份試算表</summary>' +
-      '<input class="input" id="bk" style="margin-top:6px" value="' + esc(st.backupSpreadsheetId ? 'https://docs.google.com/spreadsheets/d/' + st.backupSpreadsheetId : '') + '" placeholder="貼上試算表網址">' +
-      '<div class="btn-row"><button class="btn small ghost" id="saveBk">儲存</button></div></details></details>' +
-
-      '<details class="card set-sec" data-sec="yearend"><summary class="set-sum">年底提醒</summary>' +
-      '<p class="small muted" style="margin:0">每年 12/31 前最後一個工作天 10:00 自動推播；前一天會先私訊預覽給你，可以在 LINE 上取消。</p>' +
-      '<div class="btn-row"><button class="btn small ghost" id="yePreview">預覽／手動推播</button></div></details>' +
-
-      '<details class="card set-sec" data-sec="fb"><summary class="set-sum">問題回報 ' + (fbOpen ? '<span class="badge warn">未處理 ' + fbOpen + '</span> ' : '') + (fbSched ? '<span class="badge gray">排程 ' + fbSched + '</span>' : '') + '</summary>' +
-      '<div class="choice" id="fbFilter">' + [['open', '未處理'], ['scheduled', '排程處理'], ['done', '已處理'], ['all', '全部']].map(function (o) {
+    // 三種用法：醫學會「設定」分頁（紀錄／推播／進階）、系統設定「LINE 與推播」、系統設定「問題回報」
+    var card = function (t, body) { return '<div class="card set-card"><div class="set-t">' + t + '</div>' + body + '</div>'; };
+    var mode = S.setMode || 'events';
+    var html = '';
+    if (mode === 'events') {
+      html =
+        '<div class="grp-t">紀錄</div>' +
+        card('年度鎖定', BM.yearChips('', { noNext: true, label: function (yy) { return (st.lockedYears.indexOf(yy) >= 0 ? '🔒 ' : '🔓 ') + yy; } })
+          .replace('class="year-chips"', 'class="year-chips" id="lockChips"')) +
+        card('年度備份', BM.yearChips('', { noNext: true }).replace('class="year-chips"', 'class="year-chips" id="bkChips"') +
+          (st.backupSpreadsheetId ? '<div class="small" style="margin-top:8px"><a href="https://docs.google.com/spreadsheets/d/' + esc(st.backupSpreadsheetId) + '" target="_blank" rel="noopener">備份試算表</a></div>' : '')) +
+        '<div class="grp-t">推播</div>' +
+        card('推播群組', '<div class="choice">' +
+          '<button class="btn small ' + (target === 'test' ? '' : 'ghost') + '" data-pt="test">測試群組</button>' +
+          '<button class="btn small ' + (target === 'main' ? '' : 'ghost') + '" data-pt="main">正式群組</button></div>') +
+        card('年底提醒', '<div class="btn-row" style="margin-top:0"><button class="btn small ghost" id="yePreview">預覽／手動推播</button></div>') +
+        '<div class="grp-t">進階</div>' +
+        card('資料來源', '<div class="small"><a href="' + esc(st.dataSheetUrl) + '" target="_blank" rel="noopener">報名資料試算表</a>　' +
+          '<a href="' + esc(st.staffSheetUrl) + '" target="_blank" rel="noopener">人員主檔</a></div>' +
+          '<label class="f">年度備份試算表</label><div class="row2"><input class="input" id="bk" value="' + esc(st.backupSpreadsheetId ? 'https://docs.google.com/spreadsheets/d/' + st.backupSpreadsheetId : '') + '">' +
+          '<div><button class="btn small ghost" id="saveBk">儲存</button></div></div>') +
+        card('LINE 群組 ID', '<label class="f">測試群組</label><input class="input" id="tg" value="' + esc(st.testGroupId) + '">' +
+          '<label class="f">正式群組</label><input class="input" id="mg" value="' + esc(st.mainGroupId) + '">' +
+          '<div class="btn-row"><button class="btn small ghost" id="saveGroups">儲存</button></div>');
+    } else if (mode === 'line') {
+      html =
+        card('LINE 連線', '<div class="small">' + (st.lineTokenSet ? '✅ LINE Token' : '❌ LINE Token') + '　' + (st.adminBound ? '✅ 管理員 LINE' : '❌ 管理員 LINE') + '</div>') +
+        card('LINE 選單', (st.richMenuErr ? '<div class="notice">' + esc(st.richMenuErr) + '</div>' : '') +
+          '<div class="btn-row" style="margin-top:0"><button class="btn small ghost" id="rmBtn">重新建立 LINE 選單</button></div>');
+    } else if (mode === 'fb') {
+      html = '<div class="choice" id="fbFilter">' + [['open', '未處理 ' + fbOpen], ['scheduled', '排程 ' + fbSched], ['done', '已處理'], ['all', '全部']].map(function (o) {
         return '<button class="btn small ' + (FB_FILTER === o[0] ? '' : 'ghost') + '" data-fbf="' + o[0] + '">' + o[1] + '</button>';
-      }).join('') + '</div><div id="fbList" style="margin-top:10px"></div>' +
-      '<p class="small muted">「排程處理」會在每月 1 日整理成清單私訊給你，再由 Claude 和你討論修改方式。</p></details>' +
-
-      '<details class="card set-sec" data-sec="pw"><summary class="set-sum">我的密碼</summary>' +
-      '<p class="small muted" style="margin:0 0 8px">管理員帳號的新密碼 10–20 碼，需同時包含英文與數字。</p>' +
-      '<div class="row2"><input class="input" id="op" type="password" placeholder="目前的密碼" autocomplete="current-password"><input class="input" id="np" type="password" placeholder="新密碼" autocomplete="new-password"></div>' +
-      '<div class="btn-row"><button class="btn ghost" id="pwBtn">修改密碼</button></div></details>' +
-
-      '<details class="card set-sec" data-sec="adv"><summary class="set-sum">進階</summary>' +
-      '<p class="small muted">LINE 選單平常會自動更新；只有選單不見或沒更新時才需要按。</p>' +
-      '<div class="btn-row"><button class="btn small ghost" id="rmBtn">重新建立 LINE 選單</button></div>' +
-      '<p class="small" style="margin-top:12px"><a href="' + esc(st.dataSheetUrl) + '" target="_blank" rel="noopener">開啟資料試算表</a>　' +
-      '<a href="' + esc(st.staffSheetUrl) + '" target="_blank" rel="noopener">開啟人員主檔</a></p></details>';
+      }).join('') + '</div><div id="fbList" style="margin-top:10px"></div>';
+    }
+    box.innerHTML = html;
 
     $$('details[data-sec]', box).forEach(function (d) {
       d.open = !!SET_OPEN[d.dataset.sec];
@@ -658,7 +656,7 @@
         BM.toast('推播目標：' + (pt === 'main' ? '正式群組' : '測試群組'));
       };
     });
-    $('#saveGroups').onclick = async function () {
+    if ($('#saveGroups')) $('#saveGroups').onclick = async function () {
       await reload(await call('saveSettings', { settings: { testGroupId: $('#tg').value, mainGroupId: $('#mg').value } }));
       BM.toast('已儲存群組 ID');
     };
@@ -690,12 +688,12 @@
         BM.toast('已備份到「' + r.sheet + '」分頁');
       };
     });
-    $('#saveBk').onclick = async function () {
+    if ($('#saveBk')) $('#saveBk').onclick = async function () {
       await reload(await call('saveSettings', { settings: { backupSpreadsheetId: $('#bk').value } }));
       BM.toast('已儲存');
     };
     // 年底提醒
-    $('#yePreview').onclick = async function () {
+    if ($('#yePreview')) $('#yePreview').onclick = async function () {
       var p = await call('previewYearEnd');
       var tname = p.target === 'main' ? '正式群組' : '測試群組';
       var m = BM.modal('<h2>年底提醒</h2>' +
@@ -712,6 +710,7 @@
     };
     // 問題回報
     function drawFb() {
+      if (!$('#fbList')) return;
       var list = D.feedback.filter(function (f) {
         return FB_FILTER === 'all' ? true : FB_FILTER === 'open' ? f.status === 'new' : f.status === FB_FILTER;
       });
@@ -738,12 +737,12 @@
       };
     });
     drawFb();
-    $('#rmBtn').onclick = async function () {
+    if ($('#rmBtn')) $('#rmBtn').onclick = async function () {
       await call('runJobNow', { job: 'richmenu' });
       BM.toast('已重新建立，請關閉 LINE 聊天室再打開');
       reload();
     };
-    $('#pwBtn').onclick = async function () {
+    if ($('#pwBtn')) $('#pwBtn').onclick = async function () {
       var n = $('#np').value;
       if (n.length < 10 || n.length > 20 || !/[A-Za-z]/.test(n) || !/\d/.test(n)) return BM.toast('新密碼需 10–20 碼，需同時有英文與數字', true);
       var r = await call('changeMyPassword', { oldPassword: $('#op').value, newPassword: n });

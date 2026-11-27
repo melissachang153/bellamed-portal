@@ -44,6 +44,8 @@ var ATT_MOCK = function (opts) {
       return { days: base.days || {}, overrides: (base.overrides || []).concat(DB.CalOverrides.filter(function (o) { return o.date.slice(0, 4) === String(y) && !o.voided; })) };
     },
     audit: function () { },
+    canExport: function (m) { return m.role === 'manager' || m.dept === '行政'; },
+    adjust: function (id, y, k) { return ((DB.Adj || {})[id] || {})[y] && DB.Adj[id][y][k] || 0; },
     notify: function (toId, text) { if (opts.notify) opts.notify(toId, text); },
     uid: function () { return 'm' + (++seq) + Date.now().toString(36); }
   });
@@ -57,10 +59,25 @@ var ATT_MOCK = function (opts) {
     handlers: {
       attToday: function (d) { return svc.today(me(d)); },
       attPunch: function (d) { return svc.punch(me(d), d.kind, !!d.overwrite); },
-      attAbnormal: function (d) { return svc.abnormal(me(d), String(d.ym || '')); },
-      attMonth: function (d) { return svc.month(me(d), String(d.ym || ''), String(d.staffId || '')); },
-      attTeam: function (d) { return svc.team(me(d), String(d.date || '')); },
+      attMonth: function (d) {
+        var m = me(d);
+        var r = String(d.staffId) === 'all' ? svc.monthAll(m, String(d.ym || '')) : svc.month(m, String(d.ym || ''), String(d.staffId || ''));
+        r.people = svc.people(m);
+        return r;
+      },
+      attBalances: function (d) { return { balances: svc.balances(me(d), String(d.year || '')), types: svc.leaveTypes() }; },
       attSaveFix: function (d) { return svc.saveFix(me(d), String(d.id || ''), d.data || {}); },
+      attSaveLeave: function (d) { return svc.saveLeave(me(d), String(d.id || ''), d.data || {}); },
+      attSaveOt: function (d) { return svc.saveOt(me(d), String(d.id || ''), d.data || {}); },
+      attReq: function (d) { return svc.reqById(me(d), String(d.id || '')); },
+      attTodos: function (d) { return svc.todos(me(d)); },
+      attAdjust: function (d) {
+        var id = String(d.staffId || ''), y = String(d.year || now().date.slice(0, 4));
+        DB.Adj = DB.Adj || {}; DB.Adj[id] = DB.Adj[id] || {}; DB.Adj[id][y] = DB.Adj[id][y] || {};
+        ['annual', 'comp'].forEach(function (k) { if (d[k] !== undefined && d[k] !== '') DB.Adj[id][y][k] = Math.round(Number(d[k]) || 0); });
+        persist();
+        return DB.Adj[id][y];
+      },
       attCancel: function (d) { return svc.cancel(me(d), String(d.id || '')); },
       attMyReqs: function (d) { return svc.myRequests(me(d)); },
       attReview: function (d) { return svc.review(me(d)); },
@@ -78,8 +95,14 @@ var ATT_MOCK = function (opts) {
     },
     home: function (token) {
       var m = opts.me(token);
-      if (!m) return { att: null, pendingAtt: 0 };
-      return { att: svc.today(m), pendingAtt: svc.pendingCount(m) };
+      if (!m) return { att: null, pendingAtt: 0, todos: [], review: [], mine: [] };
+      var rv = svc.review(m).todo;
+      return {
+        att: svc.today(m), pendingAtt: rv.length,
+        review: rv.map(function (r) { return { kind: 'att', id: r.id, title: r.staff + '・' + r.title }; }),
+        todos: svc.todos(m),
+        mine: svc.myRequests(m).slice(0, 5).map(function (r) { return { id: r.id, title: r.title, status: r.status, mode: r.mode }; })
+      };
     }
   };
 };

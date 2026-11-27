@@ -11,7 +11,7 @@
     window.TEST_CLEAR();
     location.reload();
   };
-  $('#testBack').onclick = function () { location.href = 'index.html#/admin'; };
+  $('#testBack').onclick = function () { location.href = 'index.html#/settings'; };
   if ($('#simFirst')) $('#simFirst').onchange = function () { this.parentElement.classList.toggle('on', this.checked); };
 
   if (!ADMIN) {
@@ -44,7 +44,6 @@
   function canSee(s, page) {
     var p = DATA.perms[s.role === 'manager' ? 'manager' : 'staff'];
     if (!p[page]) return false;
-    if (page === 'corrections') return s.counted;
     return true;
   }
   function meView(s) {
@@ -161,7 +160,9 @@
         return e.status !== 'cancelled' && e.dates.length && e.dates[e.dates.length - 1] >= t;
       }).slice(0, 4).map(function (e) { return { id: e.id, name: e.name, dates: e.dates, mine: e.mine.length > 0, peopleCount: e.peopleCount }; }) : null;
       var ah = attMock().home(d.token);
-      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt } };
+      var todos = ah.todos.slice();
+      (evs || []).forEach(function (e) { if (!e.mine && e.dates[0] <= ATT.addDays(t, 30)) todos.push({ kind: 'event', id: e.id, title: e.name + ' 尚未報名' }); });
+      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt, todos: todos, review: ah.review, mine: ah.mine } };
     },
     changePassword: function (d) {
       var s = userFrom(d.token);

@@ -13,14 +13,14 @@
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
   <title>寶漾行政系統・測試模式</title>
-  <link rel="stylesheet" href="assets/style.css?v=2.3.0">
+  <link rel="stylesheet" href="assets/style.css?v=2.4.0">
 </head>
 <body class="test-mode">
   <div class="test-bar">🧪 測試模式：任選員工英文名登入、密碼一律 <b>test</b>。操作不會寫入正式資料。
     <label class="sim-now">切換身分 <select id="testAs" class="input mini"><option value="">（未登入）</option></select></label>
     <label class="sim-now">模擬現在時間 <input type="datetime-local" id="simNow" class="input mini"></label>
     <button type="button" class="btn small ghost" id="testReset">重設測試資料</button>
-    <button type="button" class="btn small ghost" id="testBack">回管理中心</button></div>
+    <button type="button" class="btn small ghost" id="testBack">回系統設定</button></div>
   <section id="loginView" hidden>
     <main>
       <div class="card login">
@@ -66,24 +66,24 @@
     </div>
     <nav class="bottom-nav" id="bottomNav" aria-label="常用功能">
       <a href="#/home" data-r="home"><span>🏠</span>首頁</a>
-      <a href="#/attendance/punch" data-r="attendance/punch"><span>⏰</span>打卡</a>
-      <a href="#/attendance/leave" data-r="attendance/leave"><span>📅</span>請假</a>
+      <a href="#/attendance/detail" data-r="attendance/detail"><span></span>出勤明細</a>
+      <a href="#/attendance/apply" data-r="attendance/apply"><span></span>申請</a>
       <a href="#/me" data-r="me"><span>👤</span>我的</a>
     </nav>
   </section>
 
   <div id="busy" hidden></div>
-  <script src="assets/config.js?v=2.3.0"></script>
-  <script src="assets/test-boot.js?v=2.3.0"></script>
-  <script src="assets/common.js?v=2.3.0"></script>
-  <script src="assets/avatars.js?v=2.3.0"></script>
-  <script src="assets/test.js?v=2.3.0"></script>
-  <script src="assets/att-core.js?v=2.3.0"></script>
-  <script src="assets/att-mock.js?v=2.3.0"></script>
-  <script src="assets/mod-events.js?v=2.3.0"></script>
-  <script src="assets/mod-attendance.js?v=2.3.0"></script>
-  <script src="assets/adm-events.js?v=2.3.0"></script>
-  <script src="assets/adm-attendance.js?v=2.3.0"></script>
-  <script src="assets/shell.js?v=2.3.0"></script>
+  <script src="assets/config.js?v=2.4.0"></script>
+  <script src="assets/test-boot.js?v=2.4.0"></script>
+  <script src="assets/common.js?v=2.4.0"></script>
+  <script src="assets/avatars.js?v=2.4.0"></script>
+  <script src="assets/test.js?v=2.4.0"></script>
+  <script src="assets/att-core.js?v=2.4.0"></script>
+  <script src="assets/att-mock.js?v=2.4.0"></script>
+  <script src="assets/xlsx.js?v=2.4.0"></script>
+  <script src="assets/mod-events.js?v=2.4.0"></script>
+  <script src="assets/mod-attendance.js?v=2.4.0"></script>
+  <script src="assets/adm-events.js?v=2.4.0"></script>
+  <script src="assets/shell.js?v=2.4.0"></script>
 </body>
 </html>
