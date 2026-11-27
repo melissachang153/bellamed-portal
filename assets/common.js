@@ -310,11 +310,11 @@ var BM = (function () {
     draw();
   }
 
-  // 流程圖 O——O——O：每一關上面是日期、下面是「人名＋動作」
+  // 流程圖 O——O——O：圓圈上面是「日期＋動作」（例：11/27申訴），下面是人名（例：Liz）
   // steps：[{ date, who, act, state: done|cur|todo|bad, opt }]；mini＝清單裡的小尺寸
   function steps(list, mini) {
     return '<div class="steps' + (mini ? ' mini' : '') + '">' + (list || []).map(function (s) {
-      return '<div class="st ' + (s.state || 'todo') + (s.opt ? ' opt' : '') + '"><em>' + esc(s.date || '') + '</em><i></i><b>' + esc((s.who || '') + (s.act || '')) + '</b></div>';
+      return '<div class="st ' + (s.state || 'todo') + (s.opt ? ' opt' : '') + '"><em><span>' + esc(s.date || '') + '</span>' + esc(s.act || '') + '</em><i></i><b>' + esc(s.who || '') + '</b></div>';
     }).join('') + '</div>';
   }
 

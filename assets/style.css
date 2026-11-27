@@ -800,3 +800,18 @@ table.q-t tr.na td { color: var(--muted); }
 .ne-opts > span[id] { display: inline-flex; gap: 8px; align-items: center; }
 .ne-opts > span[id] .input { margin: 0; }
 .ne-opts .chk { margin: 0; }
+/* 流程圖：上面「日期＋動作」、下面人名 */
+.st em { color: var(--ink); font-weight: 600; }
+.st.cur em { color: var(--brand); }
+.st.bad em { color: var(--bad); }
+.st.todo em { color: var(--muted); font-weight: 400; }
+.st b { font-weight: 500; }
+.steps.mini .st em { font-size: 12px; }
+@media (max-width: 720px) { .st em { font-size: 11px; letter-spacing: -.2px; } }
+/* 手機：日期、動作分兩行，避免擠在一起 */
+@media (max-width: 720px) {
+  .st em { height: 30px; line-height: 15px; white-space: normal; }
+  .st em span { display: block; }
+  .st::before { top: 43px; }
+  .steps.mini .st::before { top: 39px; }
+}
