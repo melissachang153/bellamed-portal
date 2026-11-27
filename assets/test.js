@@ -6,7 +6,11 @@
   var $ = function (s) { return document.querySelector(s); };
   var PW = 'test';
 
-  $('#testReset').onclick = function () { location.reload(); };
+  $('#testReset').onclick = async function () {
+    if (!await BM.ask('要清空所有測試資料嗎？\n測試的打卡、申請單和登入身分都會清除，正式資料不受影響。', { ok: '清空', danger: true })) return;
+    window.TEST_CLEAR();
+    location.reload();
+  };
   $('#testBack').onclick = function () { location.href = 'index.html#/admin'; };
   if ($('#simFirst')) $('#simFirst').onchange = function () { this.parentElement.classList.toggle('on', this.checked); };
 
@@ -251,6 +255,7 @@
       if (!staffByEn(p.en)) DATA.staff.push({ en: p.en, region: p.region, role: p.role, counted: false, mustChange: false });
     });
     AM = ATT_MOCK({
+      persistKey: 'bellamed.test.attdb', // 測試資料留在這台電腦的瀏覽器，重新整理、換身分都還在
       people: function () { return att.people; },
       cal: function (y) { return att.cal[y] || { days: {}, overrides: [] }; },
       me: function (token) {
@@ -263,14 +268,47 @@
       }
     });
     Object.keys(AM.handlers).forEach(function (k) { H[k] = AM.handlers[k]; });
+    fillSwitcher();
     return AM;
   }
+
+  // ---------- 測試列「切換身分」：不用登出登入，直接換成另一個人（例如業務送單 → HR → Andy → Eva 審核） ----------
+  var ROLE_TAG = { admin: 'HR', manager: '主管', finance: '財務' };
+  function fillSwitcher() {
+    var sel = $('#testAs');
+    if (!sel || sel.dataset.filled) return;
+    sel.dataset.filled = '1';
+    var cur = userFrom(BM.store('staffToken'));
+    var list = DATA.staff.slice().sort(function (a, b) {
+      var ra = ROLE_TAG[a.role] ? 0 : 1, rb = ROLE_TAG[b.role] ? 0 : 1;
+      return ra - rb || a.en.localeCompare(b.en);
+    });
+    sel.innerHTML = '<option value="">（未登入）</option>' + list.map(function (s) {
+      return '<option value="' + BM.esc(s.en) + '"' + (cur && cur.en === s.en ? ' selected' : '') + '>' + BM.esc(s.en) +
+        (ROLE_TAG[s.role] ? '（' + ROLE_TAG[s.role] + '）' : '') + '</option>';
+    }).join('');
+    sel.onchange = function () {
+      BM.clearCache();
+      var s = sel.value && staffByEn(sel.value);
+      if (s) { BM.store('staffToken', 't:' + s.en); BM.store('staff', meView(s)); }
+      else { BM.store('staffToken', null); BM.store('staff', null); }
+      location.reload();
+    };
+  }
+  // 等網頁的程式都載入完（ATT_MOCK 在後面的檔案）再建立測試資料和「切換身分」選單
+  document.addEventListener('DOMContentLoaded', function () {
+    ready.then(function () { attMock(); }).catch(function () { });
+  });
+
   BM.mock = function (action, d) {
     return ready.then(wait).then(function () {
       attMock();
       var fn = H[action];
       if (!fn) throw new Error('測試頁不支援這個動作');
-      return fn(d);
+      var r = fn(d);
+      // 用登入畫面登入時，測試列的「切換身分」也跟著顯示目前的人
+      if (action === 'login' && r && r.token && $('#testAs')) $('#testAs').value = String(r.token).replace(/^t:/, '');
+      return r;
     });
   };
 })();

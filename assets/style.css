@@ -492,3 +492,32 @@ html, body { overflow-x: hidden; }
 .att-ot-total b { display: block; font-size: 22px; color: var(--brand); }
 .att-ot-total span { font-size: 12px; color: var(--muted); }
 .att-punch .nic { width: 22px; height: 22px; flex: none; }
+
+/* 今日出勤卡（2.3.0）：左邊日期與上下班時間，右邊一顆打卡按鈕 */
+.att-date2 { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; margin-bottom: 10px; }
+.att-date2 .nic { color: var(--brand); width: 22px; height: 22px; }
+.att-date2 .att-link { margin-left: auto; font-weight: 500; color: var(--brand); text-decoration: none; }
+.att-card2 { display: flex; align-items: stretch; gap: 14px; }
+.att-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+.att-line { display: flex; align-items: baseline; gap: 4px; font-size: 17px; }
+.att-line span { color: var(--muted); min-width: 3.2em; }
+.att-line b { font-size: 24px; font-variant-numeric: tabular-nums; border-bottom: 1.5px solid var(--line); min-width: 80px; padding: 0 4px 2px; }
+.att-line b i { font-style: normal; color: #b8c2c2; }
+.att-line small { font-size: 12px; color: var(--muted); }
+.att-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.att-reason { font-size: 13px; color: var(--bad); }
+.att-big-btn { flex: none; width: 128px; min-height: 128px; border-radius: 20px; border: 0; cursor: pointer; color: #fff;
+  background: var(--brand); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  box-shadow: 0 6px 16px rgba(29, 122, 127, .25); }
+.att-big-btn.out { background: var(--accent); box-shadow: 0 6px 16px rgba(75, 154, 60, .25); }
+.att-big-btn b { font-size: 30px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.att-big-btn span { font-size: 20px; font-weight: 700; letter-spacing: 2px; }
+.att-big-btn small { font-size: 12px; opacity: .9; }
+.att-big-btn:active { transform: scale(.97); }
+.att-mode { margin-bottom: 12px; }
+.att-mode .chk { background: #fff; }
+@media (max-width: 420px) {
+  .att-big-btn { width: 112px; min-height: 112px; }
+  .att-big-btn b { font-size: 26px; }
+  .att-line b { font-size: 21px; min-width: 64px; }
+}

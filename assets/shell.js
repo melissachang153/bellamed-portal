@@ -297,8 +297,7 @@
     html += '<div class="home-grid">';
     var A = BM.modules.attendance;
     if (att && h.att && A) {
-      html += '<div class="card home-card home-att"><div class="hc-title"><a href="#/attendance">' + icon('attendance') + '今日出勤</a>' +
-        '<a class="small" href="#/attendance/records" style="margin-left:auto">出勤紀錄 ›</a></div>' + A.todayCard(h.att) + A.punchButton(h.att) + '</div>';
+      html += '<div class="card home-card home-att">' + A.todayCard(h.att, { link: true }) + '</div>';
     }
     if (isApprover()) {
       var parts = [];

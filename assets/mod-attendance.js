@@ -32,38 +32,39 @@
     if (t === 'records') return renderRecords(body);
     if (t === 'fix') return renderFix(body);
     if (t === 'team') return renderTeam(body);
-    if (t === 'ot') return renderOt(body);
+
     body.innerHTML = '<div class="card empty"><b>' + (t === 'leave' ? '請假' : '加班') + '即將推出</b>' +
-      '<p class="small muted">下一階段開放線上' + (t === 'leave' ? '請假，假勤餘額也會在這裡顯示。' : '申請加班，可以選擇領加班費或換補休。') + '</p></div>';
+      '<p class="small muted">下一階段開放線上' + (t === 'leave' ? '請假，假勤餘額也會在這裡顯示。' : '申請加班（需主動申請才會記錄），可以選擇領加班費或換補休。') + '</p></div>';
   }
 
   // ---------------- 打卡 ----------------
-  function flagBadges(d) {
-    return d.flags.map(function (f) { return '<span class="badge ' + (f === '遲到' || f === '早退' ? 'warn' : 'bad') + '">' + f + '</span>'; }).join(' ') +
-      (d.otMin ? ' <span class="badge ot">加班 ' + ATT.fmtDur(d.otMin) + '</span>' : '') +
+  var ST_LABEL = { ok: ['正常', ''], abnormal: ['異常', 'bad'], working: ['上班中', 'gray'], none: ['尚未打卡', 'gray'], off: ['休假日', 'gray'], before: ['未開始', 'gray'] };
+  // 狀態標籤；showReasons＝要不要列出異常原因（HR、本人看得到）
+  function dayBadge(d, showReasons) {
+    var s = ST_LABEL[d.status] || ['', 'gray'];
+    var label = d.status === 'off' ? (d.holiday || '休假日') : s[0];
+    var rs = showReasons !== false && d.reasons && d.reasons.length && d.status !== 'ok' ? d.reasons : [];
+    return '<span class="badge ' + s[1] + '">' + esc(label) + '</span>' +
+      (rs.length ? '<span class="att-reason">' + esc(rs.join('、')) + '</span>' : '') +
       (d.pendingFix ? ' <span class="badge gray">補登審核中</span>' : '');
   }
-  function todayCard(t, big) {
-    var d = t.day;
-    var stateText = !d.inTime && !d.outTime ? '還沒打卡' : !d.outTime ? '上班中' : '已打下班卡';
-    return '<div class="att-today' + (big ? ' big' : '') + '">' +
-      '<div class="att-clock" id="attClock">' + esc(t.now) + '</div>' +
-      '<div class="att-date">' + BM.fmtDate(d.date) + (d.workday ? '' : '・<span class="badge gray">' + esc(d.holiday || '休假日') + '</span>') + '</div>' +
-      '<div class="att-cells">' +
-      '<div><span>上班</span><b>' + (d.inTime || '--:--') + '</b>' + (d.inFix ? '<small>補登</small>' : '') + '</div>' +
-      '<div><span>應下班</span><b>' + (d.expectedOut || '--:--') + '</b></div>' +
-      '<div><span>下班</span><b>' + (d.outTime || '--:--') + '</b>' + (d.outFix ? '<small>補登</small>' : '') + '</div></div>' +
-      '<div class="att-state">' + stateText + (d.flags.length || d.pendingFix ? '　' + flagBadges(d) : '') + '</div></div>';
-  }
-  // 兩顆按鈕：上班、下班。下一個該按的那顆比較醒目
-  function punchButton(t) {
+  // 今日出勤卡：左邊日期和上下班時間，右邊一顆「打卡」按鈕（顯示現在時間）
+  // opts.link：首頁用，日期那一行右邊放「出勤紀錄 ›」
+  function todayCard(t, opts) {
     var d = t.day, next = !d.inTime ? 'in' : 'out';
-    var b = function (k, label, time) {
-      return '<button class="btn att-punch ' + k + (next === k ? ' next' : '') + '" data-punch="' + k + '">' + BM.icon('attendance') +
-        '<span>' + label + (time ? '<small>已打 ' + time + '</small>' : '') + '</span></button>';
-    };
-    return '<div class="att-punch-row">' + b('in', '上班', d.inTime) + b('out', '下班', d.outTime) + '</div>';
+    var hint = d.status === 'working' && d.expectedOut ? '<span class="muted small">可下班 ' + d.expectedOut + '</span>' : '';
+    return '<div class="att-date2">' + BM.icon('attendance') + '<span>' + BM.fmtDate(d.date) + '</span>' +
+      (opts && opts.link ? '<a class="small att-link" href="#/attendance/records">出勤紀錄 ›</a>' : '') + '</div>' +
+      '<div class="att-card2">' +
+      '<div class="att-left">' +
+      '<div class="att-line"><span>上班：</span><b>' + (d.inTime || '<i>—</i>') + '</b>' + (d.inFix ? '<small>補登</small>' : '') + '</div>' +
+      '<div class="att-line"><span>下班：</span><b>' + (d.outTime || '<i>—</i>') + '</b>' + (d.outFix ? '<small>補登</small>' : '') + '</div>' +
+      '<div class="att-status">' + dayBadge(d) + hint + '</div></div>' +
+      '<button class="att-big-btn ' + next + '" data-punch="' + next + '" aria-label="' + (next === 'in' ? '上班打卡' : '下班打卡') + '">' +
+      '<b id="attClock">' + esc(t.now) + '</b><span>打卡</span><small>' + (next === 'in' ? '上班' : d.outTime ? '更新下班' : '下班') + '</small></button>' +
+      '</div>';
   }
+  function punchButton() { return ''; } // 按鈕已經在 todayCard 裡（保留給首頁呼叫）
   function bindPunch(root, after) {
     $$('[data-punch]', root).forEach(function (btn) { btn.onclick = function () { doPunch(btn.dataset.punch, after); }; });
   }
@@ -82,7 +83,7 @@
       c.textContent = tpeNow();
     }, 10000);
   }
-  // 打卡：今天已經打過同一種卡，先問要不要覆蓋；打完依結果顯示（正常＝小提示，遲到／早退／加班＝視窗）
+  // 打卡：第一下是上班，之後是下班；已經有下班卡時先問要不要覆蓋。打完依狀態提示
   async function doPunch(kind, after) {
     var t = await api('attPunch', { kind: kind });
     if (t.needConfirm) {
@@ -93,15 +94,11 @@
     }
     BM.cache(key('today'), t);
     var d = t.day, tm = t.done.time, lbl2 = kind === 'in' ? '上班' : '下班';
-    if (kind === 'in' && d.late) {
-      BM.notice(tm + ' 上班打卡成功（遲到）', '已超過 9:30，今天的應下班時間是 ' + d.expectedOut + '。', { tone: 'warn' });
-    } else if (kind === 'out' && d.otMin) {
-      BM.notice(tm + ' 下班打卡成功', (d.workday ? '超時 ' + ATT.fmtDur(d.overMin) : '今天是' + (d.holiday || '休假日') + '，共工作 ' + ATT.fmtDur(d.otMin)) +
-        '，已記錄加班（' + d.otKind + '）。\n加班費或補休的申請，下一階段在「加班」頁開放。');
-    } else if (kind === 'out' && d.early) {
-      BM.notice(tm + ' 下班打卡成功（早退）', '今天的應下班時間是 ' + d.expectedOut + '。如果是請假或公出，之後請補請假。', { tone: 'warn' });
-    } else if (kind === 'out' && !d.inTime) {
-      BM.notice(tm + ' 下班打卡成功', '今天沒有上班卡，會標示為缺卡。請到「補登打卡」補上今天的上班時間。', { tone: 'warn' });
+    if (kind === 'in' && d.reasons && d.reasons.length) {
+      BM.notice(tm + ' 上班打卡成功', '已超過 9:30，今天的出勤會標示異常。\n如果早上有請假或公出，請記得補請假。', { tone: 'warn' });
+    } else if (kind === 'out' && d.status === 'abnormal') {
+      BM.notice(tm + ' 下班打卡成功', '今天的出勤異常：' + d.reasons.join('、') + '。\n' +
+        (d.missingIn ? '請到「補登打卡」補上今天的上班時間。' : '如果有請假或公出，請記得補請假。'), { tone: 'warn' });
     } else {
       BM.toast(lbl2 + '打卡成功 ' + tm + (t.done.replaced ? '（已覆蓋 ' + t.done.replaced + '）' : ''));
     }
@@ -110,13 +107,13 @@
   function renderPunch(body) {
     var draw = function (t) {
       if (!alive() || S.tab !== 'punch') return;
-      body.innerHTML = '<div class="card">' + todayCard(t, true) + punchButton(t) + '</div>' +
+      body.innerHTML = '<div class="card">' + todayCard(t) + '</div>' +
         (t.punches.length ? '<div class="section-title">今天的打卡</div><div class="card">' + t.punches.map(function (p) {
           return '<div class="att-row"><b>' + p.time + '</b><span>' + p.kindLabel + '卡</span>' + (p.fix ? '<span class="badge gray">補登</span>' : '') + '</div>';
         }).join('') + '</div>' : '') +
-        '<p class="small muted att-rule">7:00–9:30 之間打上班卡，下班時間是上班打卡加 9 小時；9:30 以後打卡算遲到，下班時間固定 18:30。午休 12:30–13:30。' +
-        '下班卡比應下班時間晚 30 分鐘以上，會自動記錄加班。按錯了可以再按一次覆蓋。打卡時間以伺服器時間為準。</p>' +
-        '<div class="btn-row"><a class="btn ghost" href="#/attendance/fix">整天忘了打卡？申請補登</a></div>';
+        '<p class="small muted att-rule">工作日 9:30–18:00 要在班。9:30 前上班的人，從上班起滿 9 小時（含午休 1 小時）就可以下班，例如 8:00 上班、17:00 下班。' +
+        '9:30 以後才上班，或下班時間不夠，當天會標示異常；缺的時段如果有請假就算正常。下班卡按錯可以再按一次覆蓋。打卡時間以伺服器時間為準。</p>' +
+        '<div class="btn-row"><a class="btn ghost" href="#/attendance/fix">忘了打卡？申請補登</a></div>';
       bindPunch(body, draw);
       tick();
     };
@@ -140,9 +137,8 @@
         (isViewer() ? '<select class="input mini" id="mWho"><option value="">我自己</option></select>' : '') + '</div>' +
         (S.viewId ? '<p class="small muted" style="margin:0 4px 8px">正在看：<b>' + esc(m.staff) + '</b></p>' : '') +
         '<div class="att-sum">' +
-        sumCell('出勤天數', s.present) + sumCell('遲到', s.late, s.late) + sumCell('早退', s.early, s.early) +
-        sumCell('缺卡', s.missing, s.missing) + sumCell('補登', s.fix) + sumCell('加班', s.otMin ? ATT.fmtDur(s.otMin) : 0) + '</div>' +
-        (m.days.length ? '<div class="card att-days">' + m.days.map(dayRow).join('') + '</div>' : '<div class="card empty">這個月還沒有資料</div>');
+        sumCell('出勤天數', s.present) + sumCell('正常', s.ok) + sumCell('異常', s.abnormal, s.abnormal) + sumCell('補登', s.fix) + '</div>' +
+        (m.days.length ? '<div class="card att-days">' + m.days.map(function (d) { return dayRow(d, m.detail); }).join('') + '</div>' : '<div class="card empty">這個月還沒有資料</div>');
       $('#mPrev').onclick = function () { S.ym = shiftYm(S.ym, -1); renderRecords(body); };
       $('#mNext').onclick = function () { S.ym = shiftYm(S.ym, 1); renderRecords(body); };
       if ($('#mWho')) fillWho($('#mWho'), body);
@@ -155,7 +151,7 @@
     BM.swr(k, function () { return BM.api('attMonth', { token: token(), ym: S.ym, staffId: S.viewId }); }, draw);
   }
   function sumCell(label, n, warn) { return '<div class="' + (warn ? 'warn' : '') + '"><b>' + n + '</b><span>' + label + '</span></div>'; }
-  function dayRow(d) {
+  function dayRow(d, detail) {
     var off = !d.workday;
     var mine = !S.viewId;
     var acts = mine && !d.pendingFix ? (d.missingIn ? '<button class="btn small ghost" data-fix="in" data-date="' + d.date + '">補登上班</button>' : '') +
@@ -164,7 +160,7 @@
       '<div class="ad-date">' + BM.fmtDate(d.date, false) + (off ? '<small>' + esc(d.holiday || '休假日') + '</small>' : '') + '</div>' +
       '<div class="ad-times">' + (d.inTime || d.outTime ? '<span>' + (d.inTime || '--:--') + (d.inFix ? '*' : '') + '</span><span class="muted">→</span><span>' +
         (d.outTime || '--:--') + (d.outFix ? '*' : '') + '</span>' : '<span class="muted">' + (off ? '' : '—') + '</span>') + '</div>' +
-      '<div class="ad-flags">' + flagBadges(d) + acts + '</div></div>';
+      '<div class="ad-flags">' + (off && !d.inTime ? '' : dayBadge(d, detail !== false)) + acts + '</div></div>';
   }
   async function fillWho(sel, body) {
     var list = BM.cached(key('staffList'));
@@ -273,29 +269,9 @@
     };
   }
 
-  // ---------------- 加班（自動記錄；申請下一階段開放） ----------------
-  function renderOt(body) {
-    var y = BM.today().slice(0, 4);
-    var k = key('ot_' + y);
-    var draw = function (o) {
-      if (!alive() || S.tab !== 'ot') return;
-      body.innerHTML = '<div class="card att-ot-head"><div><b>' + o.year + ' 年已記錄的加班</b>' +
-        '<div class="small muted">下班卡比應下班時間晚 30 分鐘以上，或休假日上班，系統會自動記錄。</div></div>' +
-        '<div class="att-ot-total"><b>' + ATT.fmtDur(o.totalMin) + '</b><span>' + o.days.length + ' 天</span></div></div>' +
-        '<div class="card small muted" style="margin-top:0">申請加班費或補休的功能下一階段開放：到時候在這裡勾選要申請的日子（以天為單位），選擇加班費或補休後送出。年底還沒申請的，由財務結算。</div>' +
-        (o.days.length ? '<div class="card att-days">' + o.days.map(function (d) {
-          return '<div class="att-day">' +
-            '<div class="ad-date">' + BM.fmtDate(d.date, false) + '<small>' + esc(d.otKind) + (d.holiday ? '・' + esc(d.holiday) : '') + '</small></div>' +
-            '<div class="ad-times"><span>' + d.inTime + '</span><span class="muted">→</span><span>' + d.outTime + '</span></div>' +
-            '<div class="ad-flags"><span class="badge ot">加班 ' + ATT.fmtDur(d.otMin) + '</span><span class="badge gray">未申請</span></div></div>';
-        }).join('') + '</div>' : '<div class="card empty">今年還沒有記錄到加班</div>');
-    };
-    if (!BM.cached(k)) body.innerHTML = '<div class="card empty">讀取中…</div>';
-    BM.swr(k, function () { return BM.api('attOvertime', { token: token(), year: y }); }, draw);
-  }
-
-  // ---------------- 全員出勤 ----------------
+  // ---------------- 全員出勤（HR 另外有「本月異常清單」） ----------------
   function renderTeam(body) {
+    if (S.teamMode === 'abnormal' && S.me.role === 'admin') return renderAbnormal(body);
     if (!S.teamDate) S.teamDate = BM.today();
     var k = key('team_' + S.teamDate);
     var draw = function (t) {
@@ -304,18 +280,19 @@
       var ppl = t.people;
       var cnt = function (f) { return ppl.filter(f).length; };
       var isToday = t.date === BM.today();
-      body.innerHTML = '<div class="att-month-bar"><button class="btn small ghost" id="tPrev" aria-label="前一天">‹</button>' +
+      body.innerHTML = teamModeBar() + '<div class="att-month-bar"><button class="btn small ghost" id="tPrev" aria-label="前一天">‹</button>' +
         '<input class="input mini" type="date" id="tDate" max="' + BM.today() + '" value="' + t.date + '">' +
         '<button class="btn small ghost" id="tNext" aria-label="後一天"' + (isToday ? ' disabled' : '') + '>›</button></div>' +
         '<div class="att-sum">' + sumCell('已上班', cnt(function (d) { return d.inTime; })) +
-        sumCell(isToday ? '還沒打卡' : '缺上班卡', cnt(function (d) { return d.workday && !d.inTime; }), 1) +
-        sumCell('遲到', cnt(function (d) { return d.late; }), 1) + sumCell('早退', cnt(function (d) { return d.early; }), 1) + '</div>' +
-        '<div class="card" style="padding:0;overflow:auto"><table class="grid"><thead><tr><th>姓名</th><th>區</th><th>上班</th><th>下班</th><th>應下班</th><th>標示</th></tr></thead><tbody>' +
+        sumCell(isToday ? '還沒打卡' : '未打卡', cnt(function (d) { return d.workday && !d.inTime && !d.outTime; }), 1) +
+        sumCell('正常', cnt(function (d) { return d.status === 'ok'; })) + sumCell('異常', cnt(function (d) { return d.status === 'abnormal'; }), 1) + '</div>' +
+        '<div class="card" style="padding:0;overflow:auto"><table class="grid"><thead><tr><th>姓名</th><th>區</th><th>上班</th><th>下班</th><th>狀態</th></tr></thead><tbody>' +
         ppl.map(function (d) {
           return '<tr><td><a href="#" data-who="' + esc(d.staffId) + '">' + esc(d.staff) + '</a></td><td>' + esc(d.region || '') + '</td>' +
             '<td>' + (d.inTime || '—') + (d.inFix ? '*' : '') + '</td><td>' + (d.outTime || '—') + (d.outFix ? '*' : '') + '</td>' +
-            '<td>' + (d.expectedOut || '') + '</td><td>' + (d.workday ? flagBadges(d) : '<span class="badge gray">' + esc(d.holiday || '休假日') + '</span>') + '</td></tr>';
+            '<td>' + dayBadge(d, t.detail) + '</td></tr>';
         }).join('') + '</tbody></table></div><p class="small muted">＊＝補登的打卡。點姓名可以看那個人整個月的紀錄。</p>';
+      bindTeamMode(body);
       $('#tPrev').onclick = function () { S.teamDate = ATT.addDays(S.teamDate, -1); renderTeam(body); };
       $('#tNext').onclick = function () { S.teamDate = ATT.addDays(S.teamDate, 1); renderTeam(body); };
       $('#tDate').onchange = function () { if (this.value) { S.teamDate = this.value; renderTeam(body); } };
@@ -328,6 +305,39 @@
     BM.swr(k, function () { return BM.api('attTeam', { token: token(), date: S.teamDate }); }, draw);
   }
   function myId(ppl) { var m = ppl.filter(function (p) { return p.staff === S.me.name; })[0]; return m ? m.staffId : ''; }
+  // HR 才有的切換：「每日出勤」／「本月異常清單」
+  function teamModeBar() {
+    if (S.me.role !== 'admin') return '';
+    var cur = S.teamMode === 'abnormal' ? 'abnormal' : 'day';
+    return '<div class="choice att-mode">' + [['day', '每日出勤'], ['abnormal', '異常清單']].map(function (o) {
+      return '<button type="button" class="chk' + (o[0] === cur ? ' on' : '') + '" data-mode="' + o[0] + '">' + o[1] + '</button>';
+    }).join('') + '</div>';
+  }
+  function bindTeamMode(body) {
+    $$('[data-mode]', body).forEach(function (b) { b.onclick = function () { S.teamMode = b.dataset.mode; renderTeam(body); }; });
+  }
+  function renderAbnormal(body) {
+    if (!S.abYm) S.abYm = BM.today().slice(0, 7);
+    var k = key('ab_' + S.abYm);
+    var draw = function (a) {
+      if (!alive() || S.tab !== 'team') return;
+      var thisMonth = S.abYm >= BM.today().slice(0, 7);
+      body.innerHTML = teamModeBar() + '<div class="att-month-bar">' +
+        '<button class="btn small ghost" id="aPrev" aria-label="上個月">‹</button><b>' + S.abYm.replace('-', ' 年 ') + ' 月</b>' +
+        '<button class="btn small ghost" id="aNext" aria-label="下個月"' + (thisMonth ? ' disabled' : '') + '>›</button>' +
+        '<span class="muted small">共 ' + a.rows.length + ' 筆異常</span></div>' +
+        (a.rows.length ? '<div class="card" style="padding:0;overflow:auto"><table class="grid"><thead><tr><th>日期</th><th>姓名</th><th>上班</th><th>下班</th><th>異常原因</th></tr></thead><tbody>' +
+          a.rows.map(function (r) {
+            return '<tr><td>' + BM.fmtDate(r.date, false) + '</td><td>' + esc(r.staff) + '</td><td>' + (r.inTime || '—') + '</td><td>' + (r.outTime || '—') + '</td>' +
+              '<td>' + esc(r.reasons.join('、')) + (r.pendingFix ? ' <span class="badge gray">補登審核中</span>' : '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="card empty">這個月沒有異常</div>');
+      bindTeamMode(body);
+      $('#aPrev').onclick = function () { S.abYm = shiftYm(S.abYm, -1); renderAbnormal(body); };
+      $('#aNext').onclick = function () { S.abYm = shiftYm(S.abYm, 1); renderAbnormal(body); };
+    };
+    if (!BM.cached(k)) body.innerHTML = teamModeBar() + '<div class="card empty">讀取中…</div>';
+    BM.swr(k, function () { return BM.api('attAbnormal', { token: token(), ym: S.abYm }); }, draw);
+  }
 
   // 給首頁和「待我審核」用
   BM.modules = BM.modules || {};

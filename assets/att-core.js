@@ -3,14 +3,15 @@
  * 這裡只有規則與流程，不碰試算表或網頁畫面；存取資料由呼叫端提供（store、env）。 */
 var ATT = (function () {
   // ---------------- 上下班規則 ----------------
+  // 正常＝打卡時間（加上當天的假）有涵蓋 9:30–18:00。
+  // 提早上班（9:30 前）的人，只要從上班起滿 9 小時（8 小時＋午休 1 小時）也算正常；9:30 以後才上班不適用。
   var RULE = {
     earliest: 7 * 60,        // 7:00 前打卡視為 7:00
-    flexEnd: 9 * 60 + 30,    // 9:30（含）前打卡：下班＝上班＋9 小時
-    workSpan: 9 * 60,        // 上班到下班 9 小時（含午休 1 小時）
-    lateOut: 18 * 60 + 30,   // 9:30 以後才打卡：遲到，下班固定 18:30
+    coreFrom: 9 * 60 + 30,   // 9:30
+    coreTo: 18 * 60,         // 18:00
+    workSpan: 9 * 60,        // 9 小時（含午休 1 小時）
     lunchFrom: 12 * 60 + 30,
-    lunchTo: 13 * 60 + 30,
-    otMinStart: 30           // 下班卡晚於應下班 30 分鐘以上，才自動記錄加班
+    lunchTo: 13 * 60 + 30
   };
   var KIND_LABEL = { 'in': '上班', out: '下班' };
   var TYPE_LABEL = { fix: '補登打卡', leave: '請假', ot: '加班' };
@@ -33,10 +34,11 @@ var ATT = (function () {
     for (var i = 1; i <= n; i++) out.push(ym + '-' + pad(i));
     return out;
   }
+  // 最早可以下班的時間：9:30 前上班＝上班＋9 小時（最晚 18:00）；9:30 以後上班＝18:00
   function expectedOut(inMin) {
     if (inMin === null || inMin === undefined) return null;
     var s = Math.max(inMin, RULE.earliest);
-    return s <= RULE.flexEnd ? s + RULE.workSpan : RULE.lateOut;
+    return s <= RULE.coreFrom ? Math.min(RULE.coreTo, s + RULE.workSpan) : RULE.coreTo;
   }
 
   // ---------------- 工作日 ----------------
@@ -61,47 +63,54 @@ var ATT = (function () {
       .sort(function (a, b) { return String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || a.time.localeCompare(b.time); });
     return list[list.length - 1] || null;
   }
-  // 加班類別：平日、休息日（週六）、例假日（週日）、國定假日
-  function otKind(date, info) {
-    if (info.workday) return '平日';
-    if (info.name && !info.manual) return '國定假日';
-    if (info.manual) return '停班日';
-    return weekday(date) === 0 ? '例假日' : '休息日';
+  // 一段必須在班的時間 [from, to]，扣掉已涵蓋的區間（打卡、請假），回傳還缺的區段
+  function gapsOf(from, to, covers) {
+    var gaps = [[from, to]];
+    covers.forEach(function (c) {
+      var next = [];
+      gaps.forEach(function (g) {
+        if (c[1] <= g[0] || c[0] >= g[1]) { next.push(g); return; }
+        if (c[0] > g[0]) next.push([g[0], c[0]]);
+        if (c[1] < g[1]) next.push([c[1], g[1]]);
+      });
+      gaps = next;
+    });
+    return gaps.filter(function (g) { return g[1] > g[0]; });
   }
-  // 兩段時間重疊幾分鐘（算午休用）
-  function overlap(a1, a2, b1, b2) { return Math.max(0, Math.min(a2, b2) - Math.max(a1, b1)); }
 
   // punches：當天這個人有效的打卡（{ time: 'HH:mm:ss', kind: 'in'/'out', source, createdAt }）
-  function buildDay(date, punches, info, now) {
+  // leaves：當天已核准的假（[{ from: 'HH:mm', to: 'HH:mm' }]；請假功能上線後才會有）
+  // status：ok＝正常、abnormal＝異常、working＝今天還在上班中、none＝今天還沒打卡、off＝休假日
+  function buildDay(date, punches, info, now, leaves) {
     var pin = effective(punches, 'in'), pout = effective(punches, 'out');
     var inT = pin ? pin.time : '', outT = pout ? pout.time : '';
     var inMin = toMin(inT), outMin = toMin(outT);
-    var exp = info.workday ? expectedOut(inMin) : null;
-    var past = date < now.date;
+    var lv = (leaves || []).map(function (l) { return [toMin(l.from), toMin(l.to)]; });
+    var exp = info.workday && inT ? expectedOut(inMin) : (info.workday ? RULE.coreTo : null);
+    var today = date === now.date;
     var d = {
       date: date, workday: info.workday, holiday: info.name || '', inTime: inT.slice(0, 5), outTime: outT.slice(0, 5),
       inFix: !!(pin && pin.source === 'fix'), outFix: !!(pout && pout.source === 'fix'),
-      expectedOut: fmtMin(exp), late: false, early: false, missingIn: false, missingOut: false,
-      overMin: 0, otMin: 0, otKind: '', flags: [], status: 'ok'
+      expectedOut: fmtMin(exp), status: 'ok', reasons: [], missingIn: false, missingOut: false, leaveMin: 0
     };
-    if (info.workday) {
-      if (inT && inMin > RULE.flexEnd) d.late = true;
-      if (inT && outT && outMin < exp) d.early = true;
-      if (!inT && (past || outT)) d.missingIn = true;
-      if (inT && !outT && past) d.missingOut = true;
-      if (outT && exp !== null && outMin > exp) d.overMin = outMin - exp;
-      // 加班：下班卡晚於應下班 30 分鐘以上才記錄（記全部超時分鐘）；補登的下班卡不算加班
-      if (d.overMin >= RULE.otMinStart && !d.outFix) d.otMin = d.overMin;
-    } else if (inT && outT && outMin > inMin && !d.inFix && !d.outFix) {
-      // 休假日上班：整段都算加班，扣掉和午休重疊的時間
-      d.otMin = outMin - inMin - overlap(inMin, outMin, RULE.lunchFrom, RULE.lunchTo);
+    if (!info.workday) { d.status = 'off'; return d; }
+    // 這一天必須在班的時段：9:30 到 應下班（9:30 前上班的人，滿 9 小時就可以下班）
+    var need = [RULE.coreFrom, exp];
+    // 整段都有請假：正常
+    if (!gapsOf(need[0], need[1], lv).length) { d.status = 'ok'; d.reasons = ['請假']; return d; }
+    if (today && !outT) {
+      // 今天還沒下班：先不判斷（只提示 9:30 後才上班）
+      d.status = inT ? 'working' : 'none';
+      if (inT && inMin > RULE.coreFrom && gapsOf(RULE.coreFrom, inMin, lv).length) d.reasons = ['9:30 後才上班'];
+      return d;
     }
-    if (d.otMin) d.otKind = otKind(date, info);
-    if (d.late) d.flags.push('遲到');
-    if (d.early) d.flags.push('早退');
-    if (d.missingIn) d.flags.push('缺上班卡');
-    if (d.missingOut) d.flags.push('缺下班卡');
-    if (d.flags.length) d.status = 'abnormal';
+    if (!inT) { d.missingIn = true; d.reasons.push('缺上班卡'); }
+    if (!outT) { d.missingOut = true; d.reasons.push('缺下班卡'); }
+    if (inT && outT) {
+      var gaps = gapsOf(need[0], need[1], lv.concat([[Math.max(inMin, RULE.earliest), outMin]]));
+      gaps.forEach(function (g) { d.reasons.push('缺 ' + fmtMin(g[0]) + '–' + fmtMin(g[1])); });
+    }
+    if (d.reasons.length) d.status = 'abnormal';
     return d;
   }
 
@@ -159,13 +168,25 @@ var ATT = (function () {
     }
     function dayOf(p, date, now, all) {
       var list = (all || punchesOf(p.id, date, date)).filter(function (x) { return x.date === date; });
-      var d = buildDay(date, list, infoFor(date, p), now);
+      var d = buildDay(date, list, infoFor(date, p), now, env.leaves ? env.leaves(p.id, date) : []);
+      // 出勤系統上線前、或到職前的日子：不判斷正常／異常
+      var start = env.startDate ? env.startDate() : '';
+      if (d.workday && ((start && date < start) || (p.hireDate && date < p.hireDate)) && !d.inTime && !d.outTime) {
+        d.status = 'before'; d.reasons = []; d.missingIn = d.missingOut = false;
+      }
       d.pendingFix = store.all('Requests').filter(function (r) {
         return r.staffId === p.id && r.type === 'fix' && r.status === 'pending' && (r.pendingData || r.data).date === date;
       }).length;
       return d;
     }
     function isViewer(me) { return ['admin', 'manager', 'finance'].indexOf(me.role) >= 0; }
+    function activePeople() { return env.people().filter(function (p) { return p.active !== false; }); }
+    // 異常原因：HR 和本人看得到；主管、財務看別人時只看正常／異常
+    function canDetail(me, p) { return me.role === 'admin' || !p || me.id === p.id; }
+    function detail(me, d, p) {
+      if (!canDetail(me, p)) d.reasons = [];
+      return d;
+    }
     function reqView(r, viewer) {
       var p = person(r.staffId) || { id: r.staffId, en: '' };
       var who = currentApprover(r, p, env.people());
@@ -244,21 +265,6 @@ var ATT = (function () {
         t.done = { kind: kind, time: now.time.slice(0, 5), replaced: prevEff ? prevEff.time.slice(0, 5) : '' };
         return t;
       },
-      // 自動記錄的加班（某一年）：每天一列；申請功能下一階段開放
-      overtime: function (me, year) {
-        var now = env.now();
-        year = /^\d{4}$/.test(String(year || '')) ? String(year) : now.date.slice(0, 4);
-        var from = year + '-01-01', to = year + '-12-31' < now.date ? year + '-12-31' : now.date;
-        var all = punchesOf(me.id, from, to);
-        var dates = {};
-        all.forEach(function (x) { dates[x.date] = 1; });
-        var days = Object.keys(dates).sort().reverse().map(function (dt) { return dayOf(me, dt, now, all); })
-          .filter(function (d) { return d.otMin > 0; })
-          .map(function (d) { return { date: d.date, inTime: d.inTime, outTime: d.outTime, expectedOut: d.expectedOut, otMin: d.otMin, otKind: d.otKind, holiday: d.holiday, status: 'open' }; });
-        var total = 0;
-        days.forEach(function (d) { total += d.otMin; });
-        return { year: year, days: days, totalMin: total };
-      },
       // 一個月的出勤（自己的；HR、主管、財務可以看別人）
       month: function (me, ym, staffId) {
         var now = env.now();
@@ -267,18 +273,16 @@ var ATT = (function () {
         if (!/^\d{4}-\d{2}$/.test(ym)) ym = now.date.slice(0, 7);
         var days = monthDays(ym);
         var all = punchesOf(p.id, days[0], days[days.length - 1]);
-        var out = days.filter(function (d) { return d <= now.date; }).map(function (d) { return dayOf(p, d, now, all); });
-        var sum = { workdays: 0, present: 0, late: 0, early: 0, missing: 0, fix: 0, otDays: 0, otMin: 0 };
+        var out = days.filter(function (d) { return d <= now.date; }).map(function (d) { return detail(me, dayOf(p, d, now, all), p); });
+        var sum = { workdays: 0, present: 0, ok: 0, abnormal: 0, fix: 0 };
         out.forEach(function (d) {
           if (d.workday) sum.workdays++;
           if (d.inTime || d.outTime) sum.present++;
-          if (d.late) sum.late++;
-          if (d.early) sum.early++;
-          if (d.missingIn || d.missingOut) sum.missing++;
+          if (d.status === 'ok') sum.ok++;
+          if (d.status === 'abnormal') sum.abnormal++;
           if (d.inFix || d.outFix) sum.fix++;
-          if (d.otMin) { sum.otDays++; sum.otMin += d.otMin; }
         });
-        return { ym: ym, staff: p.en, staffId: p.id, days: out.reverse(), summary: sum };
+        return { ym: ym, staff: p.en, staffId: p.id, days: out.reverse(), summary: sum, detail: canDetail(me, p) };
       },
       // 全員某一天的出勤（HR、主管、財務）
       team: function (me, date) {
@@ -288,13 +292,32 @@ var ATT = (function () {
         var all = store.all('Punches').filter(function (x) { return x.date === date && !bool(x.voided); });
         return {
           date: date,
-          people: env.people().filter(function (p) { return p.active !== false; }).map(function (p) {
-            var d = dayOf(p, date, now, all.filter(function (x) { return x.staffId === p.id; }));
+          detail: me.role === 'admin',
+          people: activePeople().map(function (p) {
+            var d = detail(me, dayOf(p, date, now, all.filter(function (x) { return x.staffId === p.id; })), p);
             d.staff = p.en; d.staffId = p.id; d.region = p.region;
             return d;
           }).sort(function (a, b) { return a.staff.localeCompare(b.staff); }),
-          staffList: env.people().filter(function (p) { return p.active !== false; }).map(function (p) { return { id: p.id, en: p.en }; })
+          staffList: activePeople().map(function (p) { return { id: p.id, en: p.en }; })
         };
+      },
+      // HR：某個月所有人的異常清單（含原因）
+      abnormal: function (me, ym) {
+        if (me.role !== 'admin') throw new Error('只有 HR 可以看異常清單');
+        var now = env.now();
+        if (!/^\d{4}-\d{2}$/.test(ym || '')) ym = now.date.slice(0, 7);
+        var days = monthDays(ym).filter(function (d) { return d <= now.date; });
+        var all = store.all('Punches').filter(function (x) { return x.date.slice(0, 7) === ym && !bool(x.voided); });
+        var rows = [];
+        activePeople().forEach(function (p) {
+          var mine = all.filter(function (x) { return x.staffId === p.id; });
+          days.forEach(function (dt) {
+            var d = dayOf(p, dt, now, mine);
+            if (d.status === 'abnormal') rows.push({ date: dt, staff: p.en, staffId: p.id, region: p.region, inTime: d.inTime, outTime: d.outTime, reasons: d.reasons, pendingFix: d.pendingFix });
+          });
+        });
+        rows.sort(function (a, b) { return b.date.localeCompare(a.date) || a.staff.localeCompare(b.staff); });
+        return { ym: ym, rows: rows };
       },
       // 補登打卡：新增或修改
       saveFix: function (me, id, data) {
