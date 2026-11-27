@@ -205,6 +205,8 @@
     box.innerHTML = '<div class="card" style="max-width:900px"><div class="rh" style="display:flex;gap:10px;align-items:center"><b style="flex:1;font-size:16px">' +
       esc(c.title + (c.applicant ? '・' + c.applicant : '')) + '</b><span class="badge ' + (CHIP[c.status] || '') + '">' + esc(c.statusLabel) + '</span></div>' +
       BM.steps(c.steps) +
+      (c.deadlines && c.deadlines.accept && c.status === 'submitted' ? '<div class="small muted">受理期限：' + esc(c.deadlines.accept) + '</div>' : '') +
+      (c.deadlines && c.deadlines.decide && c.status === 'accepted' ? '<div class="small muted">決定期限：' + esc(c.deadlines.decide) + '</div>' : '') +
       (c.decision ? '<div class="case-dec">' + esc(c.decision) + '</div>' : '') +
       (c.canAppeal ? '<div class="small muted" style="margin-top:6px">申復期限：' + ymd(c.appealUntil) + '</div>' : '') +
       (btn.length ? '<div class="btn-row">' + btn.map(function (b) { return '<button class="btn ' + b[2] + '" data-act="' + b[0] + '">' + b[1] + '</button>'; }).join('') + '</div>' : '') +

@@ -142,7 +142,7 @@
     return out.concat([
       { date: acc ? md5(acc.t) : '', who: rn, act: '受理', state: st(acc, c.status === 'submitted') },
       { date: '', who: rn, act: '調查', state: dec ? 'done' : c.status === 'accepted' ? 'cur' : 'todo' },
-      { date: dec ? md5(dec.t) : '3 個月內', who: rn, act: '決定', state: dec ? 'done' : 'todo' },
+      { date: dec ? md5(dec.t) : '', who: rn, act: '決定', state: dec ? 'done' : 'todo' },
       { date: app ? md5(app.t) : '', who: c.en, act: '申復', state: app ? (appd ? 'done' : 'cur') : 'todo', opt: !app },
       { date: clo || appd ? md5((clo || appd).t) : '', who: '', act: '結案', state: c.status === 'closed' ? 'done' : 'todo' }]);
   }
@@ -163,6 +163,8 @@
       if (!role) return fail('找不到這個案件');
       var v = caseSum(c, role);
       v.to = c.to; v.data = c.data; v.decision = c.decision || '';
+      var plus = function (days) { return new Date(Date.parse(c.createdAt.slice(0, 10)) + days * 86400000).toISOString().slice(0, 10).replace(/-/g, '/'); };
+      v.deadlines = role === 'receiver' && c.kind === 'complaint' ? { accept: plus(14), decide: plus(91) } : {};
       v.history = c.history.filter(function (h) { return role === 'receiver' || h.act !== 'memo'; });
       var dec = c.history.filter(function (h) { return h.act === 'decide'; })[0];
       v.canAppeal = role === 'applicant' && c.kind === 'complaint' && c.status === 'decided' && !!dec;
