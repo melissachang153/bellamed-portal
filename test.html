@@ -5,22 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1d7a7f">
   <meta name="robots" content="noindex, nofollow">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://drive.google.com https://*.googleusercontent.com; connect-src https://script.google.com https://script.googleusercontent.com; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://drive.google.com https://*.googleusercontent.com; connect-src https://script.google.com https://script.googleusercontent.com; manifest-src 'self'; frame-src https://www.youtube-nocookie.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="寶漾行政系統">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon-192.png">
-  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=2.5.0">
+  <link rel="apple-touch-startup-image" href="assets/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-828x1792.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="assets/splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
   <title>寶漾行政系統・測試模式</title>
-  <link rel="stylesheet" href="assets/style.css?v=2.4.0">
+  <link rel="stylesheet" href="assets/style.css?v=2.5.0">
 </head>
 <body class="test-mode">
   <div class="test-bar">🧪 測試模式：任選員工英文名登入、密碼一律 <b>test</b>。操作不會寫入正式資料。
     <label class="sim-now">切換身分 <select id="testAs" class="input mini"><option value="">（未登入）</option></select></label>
     <label class="sim-now">模擬現在時間 <input type="datetime-local" id="simNow" class="input mini"></label>
     <button type="button" class="btn small ghost" id="testReset">重設測試資料</button>
-    <button type="button" class="btn small ghost" id="testBack">回系統設定</button></div>
+    <button type="button" class="btn small ghost" id="testBack">回後台設定</button></div>
   <section id="loginView" hidden>
     <main>
       <div class="card login">
@@ -73,17 +81,18 @@
   </section>
 
   <div id="busy" hidden></div>
-  <script src="assets/config.js?v=2.4.0"></script>
-  <script src="assets/test-boot.js?v=2.4.0"></script>
-  <script src="assets/common.js?v=2.4.0"></script>
-  <script src="assets/avatars.js?v=2.4.0"></script>
-  <script src="assets/test.js?v=2.4.0"></script>
-  <script src="assets/att-core.js?v=2.4.0"></script>
-  <script src="assets/att-mock.js?v=2.4.0"></script>
-  <script src="assets/xlsx.js?v=2.4.0"></script>
-  <script src="assets/mod-events.js?v=2.4.0"></script>
-  <script src="assets/mod-attendance.js?v=2.4.0"></script>
-  <script src="assets/adm-events.js?v=2.4.0"></script>
-  <script src="assets/shell.js?v=2.4.0"></script>
+  <script src="assets/config.js?v=2.5.0"></script>
+  <script src="assets/test-boot.js?v=2.5.0"></script>
+  <script src="assets/common.js?v=2.5.0"></script>
+  <script src="assets/avatars.js?v=2.5.0"></script>
+  <script src="assets/test.js?v=2.5.0"></script>
+  <script src="assets/att-core.js?v=2.5.0"></script>
+  <script src="assets/att-mock.js?v=2.5.0"></script>
+  <script src="assets/xlsx.js?v=2.5.0"></script>
+  <script src="assets/mod-events.js?v=2.5.0"></script>
+  <script src="assets/mod-attendance.js?v=2.5.0"></script>
+  <script src="assets/mod-info.js?v=2.5.0"></script>
+  <script src="assets/adm-events.js?v=2.5.0"></script>
+  <script src="assets/shell.js?v=2.5.0"></script>
 </body>
 </html>

@@ -80,7 +80,16 @@
     var ended = function (e) { return e.dates.length && e.dates[e.dates.length - 1] < today; };
     var upcoming = D.events.filter(function (e) { return !ended(e) && e.status !== 'draft'; }).reverse();
     var drafts = D.events.filter(function (e) { return !ended(e) && e.status === 'draft'; }).reverse();
-    var past = D.events.filter(ended);
+    var thisYear = today.slice(0, 4);
+    var past = D.events.filter(function (e) { return ended(e) && e.dates[0].slice(0, 4) === thisYear; });
+    var mineOf = function (e) { return BM.modules.events && BM.modules.events.mineOf ? BM.modules.events.mineOf(e.id) : []; };
+    var regBtn = function (e) {
+      if (e.status !== 'published' || ended(e)) return '';
+      var m = mineOf(e);
+      if (!m.length) return '<button class="btn small go" data-act="reg" data-id="' + e.id + '">報名</button>';
+      return '<span class="mine">✓ 我已報名 ' + esc(m.map(function (k) { var p = k.split('|'); return p[0].slice(5).replace('-', '/') + ' ' + BM.sess(p[1]); }).join('、')) + '</span>' +
+        '<button class="btn small ghost" data-act="reg" data-id="' + e.id + '">修改報名</button>';
+    };
     var meta = function (e) {
       var rows = [['日期', e.dates.length ? BM.fmtRange(e.dates) : '待定'], ['主辦', e.host], ['地點', e.location]].filter(function (r) { return r[1]; });
       return rows.map(function (r) { return '<div>' + r[0] + '：' + esc(r[1]) + '</div>'; }).join('');
@@ -93,10 +102,10 @@
         '<a href="#" class="ev-open" data-open="' + e.id + '"><b class="ev-name">' + esc(e.name) + '</b></a>' +
         '<div class="ev-meta">' + meta(e) + '</div>' +
         '<div class="ev-foot"><span class="small muted">已報名 ' + e.regCount + ' 人' + (e.suggested !== '' ? '／建議 ' + esc(e.suggested) + ' 人' : '') + '</span>' + statusBadge(e) + '</div>' +
-        '<div class="adm-row"><button class="btn small ghost" data-act="edit" data-id="' + e.id + '">編輯</button>' +
+        '<div class="adm-row">' + regBtn(e) + '<span class="grow"></span><button class="btn small ghost" data-act="edit" data-id="' + e.id + '">編輯</button>' +
         '<button class="btn small ghost" data-act="regs" data-id="' + e.id + '">報名名單（' + e.regCount + '）</button>' +
         (e.status === 'draft' ? '<button class="btn small" data-act="publish" data-id="' + e.id + '">公開</button>' : '') +
-        '<span class="grow"></span><span class="more-wrap"><button class="btn small ghost" data-more>⋯ 更多</button><span class="more-pop" hidden>' + more + '</span></span></div></div>';
+        '<span class="more-wrap"><button class="btn small ghost" data-more>⋯ 更多</button><span class="more-pop" hidden>' + more + '</span></span></div></div>';
     };
     var box = $('#tab-events');
     box.innerHTML =
@@ -104,7 +113,7 @@
       '<span class="small muted" style="margin-left:auto">推播到：<b>' + (D.settings.pushTarget === 'main' ? '正式群組' : '測試群組') + '</b></span></div>' +
       '<div class="section-title">即將舉行</div>' + (upcoming.length ? upcoming.map(card).join('') : '<div class="card empty">尚無活動</div>') +
       (drafts.length ? '<div class="section-title">草稿</div>' + drafts.map(card).join('') : '') +
-      (past.length ? '<details><summary class="section-title" style="cursor:pointer">已結束（' + past.length + '）</summary>' + past.map(card).join('') + '</details>' : '');
+      (past.length ? '<details><summary class="section-title" style="cursor:pointer">' + thisYear + ' 已結束（' + past.length + '）</summary>' + past.map(card).join('') + '</details>' : '');
     $('#newEv').onclick = function () { openEditor(null); };
     $('#pushBtn').onclick = openPush;
     $$('[data-act]', box).forEach(function (b) {
@@ -126,6 +135,7 @@
   }
   async function eventAction(act, id) {
     var e = D.events.filter(function (x) { return x.id === id; })[0];
+    if (act === 'reg') return BM.modules.events.openEvent(id, function () { if (document.getElementById('tab-events')) renderEvents(); });
     if (act === 'edit') return openEditor(e);
     if (act === 'regs') return openRegs(e);
     if (act === 'publish') { await reload(await call('setEventStatus', { id: id, status: 'published' })); BM.toast('已公開，員工可以報名了'); }
@@ -521,6 +531,8 @@
       (s.admin ? '' : '<label class="f">角色</label>' + radios('sRole', [['staff', '職員'], ['manager', '主管'], ['finance', '財務']], s.role === 'manager' || s.role === 'finance' ? s.role : 'staff')) +
       '<div class="row2"><div><label class="f">中文名' + (isTemp ? '（選填）' : '') + '</label><input class="input" id="sName" value="' + esc(s.name) + '"></div>' +
       '<div><label class="f">英文名（登入帳號）</label><input class="input" id="sEn" autocapitalize="off" value="' + esc(s.enName) + '"></div></div>' +
+      '<div class="row2"><div><label class="f">性別</label>' + radios('sGender', [['F', '女'], ['M', '男']], s.gender || '') + '</div>' +
+      '<div><label class="f">原住民</label>' + radios('sAbo', [['1', '是'], ['0', '否']], s.aboriginal ? '1' : '0') + '</div></div>' +
       '<div class="row2"><div><label class="f">部門</label><input class="input" id="sDept" value="' + esc(s.dept) + '"></div>' +
       '<div><label class="f" id="sBdayLbl">' + pwLabel(isTemp) + '</label><input class="input" id="sBday" inputmode="numeric" maxlength="4" value="' + esc(s.birthday) + '"></div></div>' +
       '<div class="row2"><div><label class="f">到職日</label><input class="input" id="sHire" type="date" value="' + esc(s.hireDate || '') + '"></div>' +
@@ -529,8 +541,6 @@
         return '<option value="' + esc(x.id) + '"' + (x.id === s.managerId ? ' selected' : '') + '>' + esc(x.enName || x.name) + '</option>';
       }).join('') + '</select></div></div>' +
       '<label class="f">備註</label><input class="input" id="sNote" value="' + esc(s.note) + '">' +
-      (isNew ? '' : '<div class="row2"><div><label class="f">' + YEAR + ' 特休調整（小時）</label><input class="input" id="sAdjA" type="number" step="0.5"></div>' +
-        '<div><label class="f">' + YEAR + ' 補休期初（小時）</label><input class="input" id="sAdjC" type="number" step="0.5"></div></div>') +
       (isNew || s.admin ? '' :
         '<label class="chk' + (s.active ? ' on' : '') + '" style="margin-top:12px"><input type="checkbox" id="sActive"' + (s.active ? ' checked' : '') + '>在職</label>') +
       '<div class="btn-row"><button class="btn" id="sSave">儲存</button></div>' +
@@ -544,12 +554,6 @@
         $$('input[name="' + x.name + '"]', r).forEach(function (y) { y.parentElement.classList.toggle('on', y.checked); });
       };
     });
-    var adj0 = null;
-    if (!isNew) call('attAdjust', { staffId: s.id, year: YEAR }).then(function (a) {
-      adj0 = a || {};
-      if ($('#sAdjA', r)) $('#sAdjA', r).value = adj0.annual ? adj0.annual / 60 : '';
-      if ($('#sAdjC', r)) $('#sAdjC', r).value = adj0.comp ? adj0.comp / 60 : '';
-    }).catch(function () { });
     var picked = function (name) { var x = $('input[name="' + name + '"]:checked', r); return x ? x.value : ''; };
     var tempBox = $('#sTemp', r);
     if (tempBox) tempBox.onchange = function () {
@@ -564,14 +568,11 @@
       var temp = !!(tempBox && tempBox.checked);
       var st = { id: isNew ? (temp ? '' : $('#sId', r).value.trim()) : s.id, temp: temp, name: $('#sName', r).value.trim(), enName: $('#sEn', r).value.trim(), region: picked('sReg'),
         dept: $('#sDept', r).value.trim(), birthday: $('#sBday', r).value.trim(), note: $('#sNote', r).value.trim(),
-        active: isNew || s.admin ? true : $('#sActive', r).checked, hireDate: $('#sHire', r).value, managerId: $('#sMgr', r).value };
+        active: isNew || s.admin ? true : $('#sActive', r).checked, hireDate: $('#sHire', r).value, managerId: $('#sMgr', r).value,
+        gender: picked('sGender'), aboriginal: picked('sAbo') === '1' };
       if (!s.admin) st.role = picked('sRole');
       if (!st.region) return BM.toast('請選擇地區', true);
       D = await call('saveStaff', { staff: st });
-      if (!isNew && adj0) {
-        var hA = Math.round((Number($('#sAdjA', r).value) || 0) * 60), hC = Math.round((Number($('#sAdjC', r).value) || 0) * 60);
-        if (hA !== (adj0.annual || 0) || hC !== (adj0.comp || 0)) await call('attAdjust', { staffId: s.id, year: YEAR, annual: hA, comp: hC });
-      }
       BM.toast('已儲存');
       m.close();
       render();
@@ -718,13 +719,19 @@
       $('#fbList').innerHTML = list.length ? list.map(function (f) {
         return '<div class="card fb-item" style="margin-bottom:8px"><div class="list-item"><div class="grow">' +
           '<div class="small muted">' + esc(f.time.replace('T', ' ').slice(0, 16)) + '・' + esc(f.who) + '・' + esc(f.page) + '</div>' +
-          esc(f.message) + '</div>' + badge(f.status) + '</div>' +
-          '<div class="btn-row">' +
+          (f.type ? '<span class="badge gray">' + esc(f.type) + '</span> ' : '') + esc(f.message) + '</div>' + badge(f.status) + '</div>' +
+          '<div class="btn-row">' + (f.fileId ? '<button class="btn small ghost" data-fbshot="' + f.id + '">截圖</button>' : '') +
           (f.status !== 'done' ? '<button class="btn small" data-fb="' + f.id + '" data-s="done">✅ 已處理</button>' : '') +
           (f.status !== 'scheduled' ? '<button class="btn small ghost" data-fb="' + f.id + '" data-s="scheduled">🗓 排程處理</button>' : '') +
           (f.status !== 'new' ? '<button class="btn small ghost" data-fb="' + f.id + '" data-s="new">改回未處理</button>' : '') +
           '</div></div>';
-      }).join('') : '<div class="small muted">沒有資料</div>';
+      }).join('') : '<div class="small muted">—</div>';
+      $$('[data-fbshot]', box).forEach(function (b) {
+        b.onclick = async function () {
+          var x = await call('feedbackFile', { id: b.dataset.fbshot });
+          BM.modal('<img class="fb-shot" alt="截圖" src="data:' + esc(x.mime) + ';base64,' + x.base64 + '">');
+        };
+      });
       $$('[data-fb]', box).forEach(function (b) {
         b.onclick = async function () { await reload(await call('setFeedbackStatus', { id: b.dataset.fb, status: b.dataset.s })); BM.toast('已更新'); };
       });
@@ -756,5 +763,5 @@
 
 
   BM.admin = BM.admin || {};
-  BM.admin.events = { mount: mount };
+  BM.admin.events = { mount: mount, redraw: function () { if (D && document.getElementById('tab-events')) renderEvents(); } };
 })();

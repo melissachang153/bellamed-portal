@@ -627,3 +627,115 @@ table.att-all td:first-child, table.att-all .badge, table.att-all th { white-spa
 @media (max-width: 600px) {
   table.att-all th, table.att-all td { padding: 8px 6px; font-size: 13px; }
 }
+
+/* ===================== 2.5.0 左側選單：功能展開子分頁 ===================== */
+button.nav-item { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.nav-mod .car { flex: none; width: 6px; height: 6px; border-right: 1.5px solid #8a9898; border-bottom: 1.5px solid #8a9898; transform: rotate(-45deg); margin-right: 6px; transition: transform .15s; }
+.nav-mod.open .car { transform: rotate(45deg); margin-top: -3px; }
+.nav-mod.cur { font-weight: 700; }
+.nav-mod.cur .nic { color: var(--brand); }
+.nav-subs { display: none; }
+.nav-subs.open { display: block; }
+.nav-item.nav-sub { padding-left: 48px; min-height: 38px; font-size: 14px; }
+.nav-item.nav-sub0 { padding-left: 18px; }
+.nav-sec.nav-adm { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 14px; }
+/* 首頁：今日出勤 */
+.home-att .hc-title { margin-bottom: 10px; }
+.pc-date { color: var(--muted); font-weight: 400; font-size: 14px; }
+.pc-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.pc-tiles > div { background: #f5f8f8; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; }
+.pc-tiles span { font-size: 13px; color: var(--muted); }
+.pc-tiles b { font-size: 26px; font-variant-numeric: tabular-nums; color: #c2cccc; line-height: 1.3; }
+.pc-tiles .has b { color: var(--ink); }
+.pc-btn { width: 100%; height: 56px; border: 0; border-radius: 14px; background: var(--accent, #4b9a3c); color: #fff; display: flex; align-items: center; justify-content: center; gap: 14px; font: inherit; font-size: 20px; font-weight: 700; letter-spacing: 2px; cursor: pointer; box-shadow: 0 6px 16px rgba(75,154,60,.25); }
+.pc-btn small { font-size: 15px; font-weight: 500; letter-spacing: 0; opacity: .9; font-variant-numeric: tabular-nums; }
+.pc-btn:active { transform: translateY(1px); }
+.pc-btn:disabled { opacity: .6; }
+.adm-row .mine { font-size: 13px; color: #2f7d3a; }
+.btn.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+.bar-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+table.his-t td:first-child { white-space: nowrap; }
+/* 選單與權限（樹狀） */
+table.perm2 tr.grp td { background: #f7fafa; padding: 6px 10px; }
+table.perm2 .grp-t { border: 0; background: none; font: inherit; font-weight: 700; color: var(--muted); font-size: 13px; cursor: pointer; padding: 4px 2px; }
+table.perm2 tr.mod td:first-child { font-weight: 700; }
+table.perm2 tr.subp td:first-child { padding-left: 30px; color: #3d4a4a; }
+.who-row { display: flex; gap: 12px; align-items: flex-start; padding: 6px 0; border-top: 1px dashed var(--line); }
+.who-row:first-child { border-top: 0; }
+.who-h { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; min-width: 72px; font-size: 13px; padding-top: 6px; }
+.who-row .who { flex: 1; }
+/* 申請附件 */
+.att-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.file-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #f7fafa; border-radius: 8px; padding: 6px 8px 6px 10px; font-size: 13px; max-width: 100%; }
+.file-chip button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 2px; }
+.file-add { border: 1px dashed var(--brand); color: var(--brand); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.att-thumbs { display: flex; flex-wrap: wrap; gap: 10px; }
+.att-th { width: 110px; height: 84px; border-radius: 10px; border: 1px solid var(--line); background: #eef2f2 center/cover no-repeat; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 4px; cursor: pointer; font: inherit; font-weight: 700; color: #c2551f; position: relative; overflow: hidden; }
+.att-th.pdf { background-color: #fdeee6; justify-content: center; }
+.att-th small { font-weight: 400; font-size: 11px; color: var(--ink); background: rgba(255,255,255,.85); border-radius: 4px; padding: 1px 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-bal span { margin-left: 10px; color: var(--muted); font-size: 13px; }
+.seg-tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; margin-bottom: 12px; }
+.seg-tabs button { border: 0; background: none; padding: 8px 18px; font: inherit; font-size: 14px; cursor: pointer; color: var(--ink); }
+.seg-tabs button.on { background: var(--brand); color: #fff; }
+table.q-t td { white-space: nowrap; }
+table.q-t tr.na td { color: var(--muted); }
+.q-in { max-width: 120px; padding: 5px 10px; }
+.fb-shot { max-width: 100%; border-radius: 10px; display: block; }
+/* ===================== 公告、規章 ===================== */
+.ann-row { display: flex; align-items: center; gap: 10px; padding: 12px 2px; border-top: 1px dashed var(--line); color: var(--ink); text-decoration: none; font-size: 15px; }
+.ann-row:first-child { border-top: 0; }
+.ann-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ann-row:hover .grow { color: var(--brand); }
+.ann-row .d { color: var(--muted); font-size: 13px; flex: none; }
+.tag { flex: none; font-size: 12px; border-radius: 6px; padding: 2px 7px; background: var(--brand-2); color: var(--brand); }
+.tag.pin { background: var(--warn-bg); color: var(--warn); }
+.tag.gray { background: #eef2f2; color: var(--muted); }
+.new { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--brand); }
+.new.off { background: transparent; }
+.news-body { white-space: pre-wrap; line-height: 1.75; margin: 12px 0; }
+.ne-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.home-news { grid-column: 1 / -1; }
+.doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px dashed var(--line); color: var(--ink); text-decoration: none; }
+.doc-row:first-child { border-top: 0; }
+.doc-row small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; font-weight: 400; }
+.doc-row .go { color: var(--muted); }
+.doc-ty { width: 40px; height: 40px; flex: none; border-radius: 10px; background: var(--brand-2); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+.doc-ty.v { background: #fdeee6; color: #c2551f; }
+.crumb { display: block; font-size: 13px; color: var(--muted); font-weight: 400; text-decoration: none; margin-bottom: 2px; }
+.doc-meta { color: var(--muted); font-size: 13px; margin: -4px 0 14px; line-height: 1.6; }
+.video-wrap { position: relative; max-width: 760px; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #1f2a2a; margin-bottom: 14px; }
+.video-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; max-width: 760px; margin-bottom: 12px; }
+.toc a { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 5px 12px; font-size: 13px; color: var(--ink); text-decoration: none; }
+.toc a:hover { border-color: var(--brand); color: var(--brand); }
+.manual { max-width: 760px; font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+.manual .note { background: #f2f6f8; border-left: 4px solid #8fa8c0; border-radius: 8px; padding: 12px 14px; margin-bottom: 6px; }
+.manual .note p { margin: 6px 0; }
+.manual .note small { color: var(--muted); }
+.manual h3 { color: #1f4e79; font-size: 19px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #1f4e79; scroll-margin-top: 70px; }
+.manual h4 { color: #2e6da4; font-size: 16px; margin: 16px 0 6px; }
+.manual h5 { font-size: 15px; margin: 14px 0 2px; }
+.manual p { margin: 6px 0; }
+.manual ul { margin: 6px 0; padding-left: 22px; }
+.manual .fine { color: var(--muted); font-size: 13px; }
+.manual .tip { background: #fff7ec; border: 1px solid #e8b46a; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+.manual .tip p { margin: 4px 0; }
+.manual table.mt { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; line-height: 1.6; }
+.manual table.mt th { background: #1f4e79; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
+.manual table.mt td { border: 1px solid #b9c9d8; padding: 8px 10px; vertical-align: top; }
+.manual table.mt td:first-child { background: #f2f6f8; font-weight: 700; min-width: 96px; }
+.manual table.mt.two td:first-child { background: none; font-weight: 400; }
+.manual table.mt.check td:first-child { text-align: center; font-weight: 400; min-width: 0; width: 32px; }
+.manual table.mt.check td:nth-child(n+3), .manual table.mt.check th:nth-child(n+3) { width: 56px; text-align: center; }
+.manual table.mt td small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.manual table.mt tr.tall td { height: 160px; }
+@media (max-width: 600px) { .manual table.mt { font-size: 13px; } .manual table.mt td, .manual table.mt th { padding: 6px; } .manual table.mt td:first-child { min-width: 72px; } }
+@media print {
+  .side, .topbar, .bottom-nav, .site-foot, .video-wrap, .toc, .page-head .crumb, #testBar { display: none !important; }
+  .manual { max-width: none; border: 0; }
+}
+/* 載入畫面 */
+#splash { position: fixed; inset: 0; z-index: 9999; background: #f4f7f7; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; color: var(--muted); font-size: 15px; letter-spacing: 1px; transition: opacity .25s; }
+#splash img { width: 120px; height: auto; }
+#splash.gone { opacity: 0; pointer-events: none; }
+.nav-item > span.car { flex: 0 0 6px !important; width: 6px; height: 6px; min-width: 0; overflow: visible; }

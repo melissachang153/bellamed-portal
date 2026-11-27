@@ -4,35 +4,25 @@
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
   var S = { me: null, events: [], tab: 'events', year: String(new Date().getFullYear()) };
   var esc = BM.esc;
-  var TABS = [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '修正申請'], ['settings', '設定']];
+  var TABS = [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '報名修正'], ['history', '歷年活動'], ['settings', '設定']];
 
   function token() { return BM.store('staffToken'); }
   function myKey() { return S.me.admin ? 'admin' : String(S.me.name).toLowerCase(); }
-  function canSee(t) { return t === 'settings' ? !!S.me.admin : !!(S.me.pages && S.me.pages[t]); }
+  function canSee(t) { return t === 'settings' ? !!S.me.admin : true; } // 每個人都能報名、看紀錄、申請修正
   function alive() { return !!document.getElementById('modEvents'); } // 已切換到別的功能就不要再畫
 
   // 掛載：root 是內容區；tab 可指定一開始顯示的分頁
   function mount(root, me, tab) {
     S.me = me;
-    var tabs = TABS.filter(function (t) { return canSee(t[0]); });
-    if (!tabs.length) {
-      root.innerHTML = '<div class="card empty">你的帳號目前沒有可以查看的醫學會頁面，請洽管理員。</div>';
-      return;
-    }
-    root.innerHTML = '<div id="modEvents"><nav class="tabs" id="evTabs">' + tabs.map(function (t) {
-      return '<button data-tab="' + t[0] + '">' + t[1] + '</button>';
-    }).join('') + '</nav><div class="mod-body">' +
+    root.innerHTML = '<div id="modEvents"><div class="mod-body">' +
       TABS.map(function (t) { return '<div id="evtab-' + t[0] + '" hidden></div>'; }).join('') + '</div></div>';
-    $$('#evTabs button').forEach(function (b) { b.onclick = function () { BM.go('events/' + b.dataset.tab); }; });
     S.events = BM.cached('ev_' + myKey()) || [];
-    var first = tabs[0][0];
-    switchTab(tab && canSee(tab) ? tab : (canSee(S.tab) ? S.tab : first));
+    switchTab(tab && canSee(tab) && TABS.some(function (t) { return t[0] === tab; }) ? tab : 'events');
     if (canSee('events')) loadEvents().then(prefetch); else prefetch();
   }
 
   function switchTab(t) {
     S.tab = t;
-    $$('#evTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
     TABS.forEach(function (x) { $('#evtab-' + x[0]).hidden = x[0] !== t; });
     // 管理者：活動報名直接是管理清單（可以新增、編輯）；設定分頁是醫學會的設定
     if (S.me.admin) { $('#evtab-events').innerHTML = ''; $('#evtab-settings').innerHTML = ''; } // 兩個分頁共用同一套管理畫面，一次只放一個
@@ -41,6 +31,7 @@
     if (t === 'settings') BM.admin.events.mount($('#evtab-settings'), ['settings'], null, { setMode: 'events' });
     if (t === 'records') loadRecords();
     if (t === 'corrections') loadCorrections();
+    if (t === 'history') renderHistory();
     window.scrollTo(0, 0);
   }
 
@@ -48,7 +39,7 @@
   async function loadEvents() {
     await BM.swr('ev_' + myKey(), function () { return BM.api('events', { token: token() }); }, function (evs) {
       S.events = evs;
-      if (alive() && S.tab === 'events' && !document.querySelector('.modal-wrap')) renderEvents(); // 正在看活動內容時不打斷
+      if (alive() && S.tab === 'events' && !document.querySelector('.modal-wrap')) { if (S.me.admin) { if (BM.admin.events.redraw) BM.admin.events.redraw(); } else renderEvents(); } // 正在看活動內容時不打斷
     });
   }
   // 在背景先抓好其他分頁的資料，切換時就不用等
@@ -116,7 +107,7 @@
     }).join('');
   }
 
-  function openEvent(id) {
+  function openEvent(id, after) {
     var e = S.events.filter(function (x) { return x.id === id; })[0];
     if (!e) return;
     var today = BM.today();
@@ -141,10 +132,8 @@
     }
 
     var sess = '';
-    if (S.me.admin || !S.me.counted) {
-      sess = ''; // 管理員或不列入統計（例如主管）：只顯示活動內容與報名名單
-    } else if (!cancelled) {
-      sess = '<h3 style="margin:18px 0 4px">我要報名</h3><p class="muted small" style="margin:0">上午、下午各算 0.5 次，可以只報其中一場。</p><div class="sess-grid">' +
+    if (!cancelled) {
+      sess = '<h3 style="margin:18px 0 4px">我要報名</h3><div class="sess-grid">' +
         e.dates.map(function (d) {
           var past = d < today;
           return '<div class="sess-day"><span class="d">' + BM.fmtDate(d) + (past ? ' <span class="badge gray">已過</span>' : '') + '</span>' +
@@ -154,8 +143,7 @@
                 (on ? ' checked' : '') + (past ? ' disabled' : '') + '>' + BM.sess(s) + '</label>';
             }).join('') + '</div>';
         }).join('') + '</div>' +
-        '<div class="btn-row"><button class="btn block" id="saveReg">儲存報名</button></div>' +
-        (e.dates.some(function (d) { return d < today; }) ? '<p class="muted small">已過的場次如需更正，請到「修正申請」。</p>' : '');
+        '<div class="btn-row"><button class="btn block" id="saveReg">儲存報名</button></div>';
     }
 
     var m = BM.modal(
@@ -180,8 +168,27 @@
       BM.cache('ev_' + myKey(), S.events);
       BM.toast('已儲存報名');
       m.close();
-      renderEvents();
+      if (after) after(); else renderEvents();
     };
+  }
+
+  // ---------------- 歷年活動 ----------------
+  function renderHistory(year) {
+    var box = $('#evtab-history');
+    if (!box) return;
+    var key = 'evh_' + (year || 'last');
+    var draw = function (r) {
+      if (!$('#evtab-history') || S.tab !== 'history') return;
+      box.innerHTML = '<div class="bar-row"><select class="input" id="hisYear" aria-label="年度" style="max-width:160px">' +
+        (r.years.length ? r.years : [r.year]).map(function (y) { return '<option value="' + y + '"' + (y === r.year ? ' selected' : '') + '>' + y + ' 年</option>'; }).join('') +
+        '</select></div>' +
+        (r.list.length ? '<div class="card" style="padding:0;overflow:auto"><table class="grid his-t"><thead><tr><th>日期</th><th>活動名稱</th><th>主辦</th></tr></thead><tbody>' +
+          r.list.map(function (e) { return '<tr><td>' + esc(BM.fmtRange(e.dates)) + '</td><td>' + esc(e.name) + '</td><td>' + esc(e.host || '—') + '</td></tr>'; }).join('') +
+          '</tbody></table></div>' : '<div class="card empty">—</div>');
+      $('#hisYear').onchange = function () { renderHistory(this.value); };
+    };
+    if (BM.cached(key) === null) box.innerHTML = '<div class="card empty">讀取中…</div>';
+    BM.swr(key, function () { return BM.api('eventHistory', { token: token(), year: year || '' }); }, draw);
   }
 
   // ---------------- 參加紀錄 ----------------
@@ -302,5 +309,5 @@
   }
 
   BM.modules = BM.modules || {};
-  BM.modules.events = { mount: mount, openEvent: function (id) { if (S.events.length) openEvent(id); } };
+  BM.modules.events = { mount: mount, openEvent: function (id, after) { if (S.events.length) openEvent(id, after); }, mineOf: function (id) { var e = S.events.filter(function (x) { return x.id === id; })[0]; return e ? e.mine : []; } };
 })();

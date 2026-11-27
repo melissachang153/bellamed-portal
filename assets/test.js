@@ -26,6 +26,7 @@
 
   // ---------- 讀取正式資料（只讀） ----------
   var DATA = null, REC = {};
+  var NEWS = [{ id: "n1", title: "（測試）年終尾牙報名開始", body: "這是測試模式的範例公告。", pinned: true, files: [], status: "published", publishedAt: new Date().toISOString().slice(0, 19), createdAt: "" }];
   var ready = BM.realApi('testData', { token: ADMIN }).then(function (d) { DATA = d; }).catch(function (e) {
     var err = new Error(e.auth ? '管理員登入已失效，請回管理頁重新登入' : '讀取正式資料失敗：' + e.message);
     throw err;
@@ -147,7 +148,7 @@
       if (!s) return authFail();
       var me = meView(s);
       var M = { events: ['醫學會', '🏥', true], repair: ['設備維修', '🔧'], training: ['教育訓練', '🎓'], attendance: ['出勤紀錄', '⏰', true],
-        apply: ['申請與通報', '📝'], assets: ['辦公設備管理', '🖨️'], news: ['公告', '📢'], rules: ['規章', '📘'] };
+        apply: ['申請與通報', '📝'], assets: ['辦公設備管理', '🖨️'], news: ['公告', '📢', true], rules: ['規章', '📘', true] };
       var groups = [['業務事項', ['events', 'repair', 'training']], ['行政事項', ['attendance', 'apply', 'assets']], ['公司資訊', ['news', 'rules']]];
       var canEv = me.pages.events || me.pages.records || me.pages.corrections;
       var menu = groups.map(function (g) {
@@ -161,9 +162,26 @@
       }).slice(0, 4).map(function (e) { return { id: e.id, name: e.name, dates: e.dates, mine: e.mine.length > 0, peopleCount: e.peopleCount }; }) : null;
       var ah = attMock().home(d.token);
       var todos = ah.todos.slice();
-      (evs || []).forEach(function (e) { if (!e.mine && e.dates[0] <= ATT.addDays(t, 30)) todos.push({ kind: 'event', id: e.id, title: e.name + ' 尚未報名' }); });
-      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt, todos: todos, review: ah.review, mine: ah.mine } };
+      var news = NEWS.filter(function (n) { return n.status === 'published'; }).slice(0, 3).map(function (n) {
+        return { kind: 'news', id: n.id, title: n.title, date: n.publishedAt.slice(0, 10), pinned: n.pinned };
+      });
+      return { me: me, menu: menu, home: { events: evs, att: ah.att, pendingAtt: ah.pendingAtt, pending: ah.pendingAtt, todos: todos, review: ah.review, mine: ah.mine, news: news } };
     },
+    // 歷年活動：用正式活動資料
+    eventHistory: function (d) {
+      var s = userFrom(d.token); if (!s) return authFail();
+      var t = today();
+      var done = DATA.events.filter(function (e) { return e.status === 'published' && e.dates.length && e.dates[e.dates.length - 1] < t; });
+      var ys = Object.keys(done.reduce(function (o, e) { o[e.dates[0].slice(0, 4)] = 1; return o; }, {})).sort().reverse();
+      var y = String(d.year || ys[0] || t.slice(0, 4));
+      return { year: y, years: ys, list: done.filter(function (e) { return e.dates[0].slice(0, 4) === y; }).map(function (e) { return { name: e.name, dates: e.dates, host: e.host }; }) };
+    },
+    // 公告：測試的公告只存在這個分頁（不會推播）
+    newsList: function (d) { var s = userFrom(d.token); if (!s) return authFail(); return NEWS.filter(function (n) { return n.status === 'published'; }); },
+    newsFile: function () { return fail('測試模式沒有附件'); },
+    // 規章：內容讀正式後端（管理員權限），只讀
+    rulesList: function () { return BM.realApi('rulesList', { token: ADMIN }); },
+    ruleDoc: function (d) { return BM.realApi('ruleDoc', { token: ADMIN, id: d.id }); },
     changePassword: function (d) {
       var s = userFrom(d.token);
       if (!s) return authFail();

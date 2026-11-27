@@ -9,6 +9,7 @@ var ATT_MOCK = function (opts) {
   } catch (e) { }
   function persist() { if (opts.persistKey) try { localStorage.setItem(opts.persistKey, JSON.stringify(DB)); } catch (e) { } }
   var seq = DB.seq || 0;
+  var FILES = {};
   var copy = function (o) { return JSON.parse(JSON.stringify(o)); };
   var store = {
     all: function (t) { return DB[t].map(copy); },
@@ -65,7 +66,23 @@ var ATT_MOCK = function (opts) {
         r.people = svc.people(m);
         return r;
       },
-      attBalances: function (d) { return { balances: svc.balances(me(d), String(d.year || '')), types: svc.leaveTypes() }; },
+      attBalances: function (d) {
+        if (d.staffId) return svc.balancesFor(me(d), String(d.staffId), String(d.year || ''));
+        return { balances: svc.balances(me(d), String(d.year || '')), types: svc.leaveTypes() };
+      },
+      // 測試附件：只存在這個分頁的記憶體裡
+      attUpload: function (d) {
+        me(d);
+        var id = 'f' + (++seq) + Date.now().toString(36);
+        FILES[id] = { name: d.name, mime: d.mimeType, base64: d.base64 };
+        return { id: id, name: d.name, mime: d.mimeType };
+      },
+      attFile: function (d) {
+        svc.reqById(me(d), String(d.id || ''));
+        var f = FILES[d.fileId];
+        if (!f) throw new Error('測試附件只在上傳的那個分頁看得到');
+        return f;
+      },
       attSaveFix: function (d) { return svc.saveFix(me(d), String(d.id || ''), d.data || {}); },
       attSaveLeave: function (d) { return svc.saveLeave(me(d), String(d.id || ''), d.data || {}); },
       attSaveOt: function (d) { return svc.saveOt(me(d), String(d.id || ''), d.data || {}); },
@@ -74,7 +91,9 @@ var ATT_MOCK = function (opts) {
       attAdjust: function (d) {
         var id = String(d.staffId || ''), y = String(d.year || now().date.slice(0, 4));
         DB.Adj = DB.Adj || {}; DB.Adj[id] = DB.Adj[id] || {}; DB.Adj[id][y] = DB.Adj[id][y] || {};
-        ['annual', 'comp'].forEach(function (k) { if (d[k] !== undefined && d[k] !== '') DB.Adj[id][y][k] = Math.round(Number(d[k]) || 0); });
+        var adj = d.adj || {};
+        ['annual', 'comp'].forEach(function (k) { if (d[k] !== undefined && d[k] !== '') adj[k] = d[k]; });
+        Object.keys(adj).forEach(function (k) { var v = Math.round(Number(adj[k]) || 0); if (v) DB.Adj[id][y][k] = v; else delete DB.Adj[id][y][k]; });
         persist();
         return DB.Adj[id][y];
       },
@@ -101,7 +120,7 @@ var ATT_MOCK = function (opts) {
         att: svc.today(m), pendingAtt: rv.length,
         review: rv.map(function (r) { return { kind: 'att', id: r.id, title: r.staff + '・' + r.title }; }),
         todos: svc.todos(m),
-        mine: svc.myRequests(m).slice(0, 5).map(function (r) { return { id: r.id, title: r.title, status: r.status, mode: r.mode }; })
+        mine: svc.myRequests(m).slice(0, 5).map(function (r) { return { id: r.id, title: r.label || r.title, status: r.status, mode: r.mode }; })
       };
     }
   };

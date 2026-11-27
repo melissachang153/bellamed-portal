@@ -166,22 +166,35 @@ var ATT = (function () {
     { key: 'personal', name: '事假', yearDays: 14 },
     { key: 'family', name: '家庭照顧假', yearDays: 7 },
     { key: 'sick', name: '病假', yearDays: 30, late: true },
-    { key: 'menstrual', name: '生理假', monthDays: 1 },
-    { key: 'marriage', name: '婚假', yearDays: 8 },
-    { key: 'funeral', name: '喪假', late: true, relation: true },
+    { key: 'menstrual', name: '生理假', monthDays: 1, only: 'F' },
+    { key: 'marriage', name: '婚假', days: 8, event: '結婚日', firstUse: true },
+    { key: 'funeral', name: '喪假', late: true, relation: true, event: '死亡日' },
     { key: 'injury', name: '公傷病假', late: true },
     { key: 'official', name: '公假' },
-    { key: 'maternity', name: '產假', yearDays: 56 },
-    { key: 'prenatal', name: '產檢假', yearDays: 7 },
-    { key: 'paternity', name: '陪產檢及陪產假', yearDays: 7 },
-    { key: 'aboriginal', name: '原住民族歲時祭儀假', yearDays: 1 }
+    { key: 'maternity', name: '產假', yearDays: 56, firstUse: true },
+    { key: 'prenatal', name: '產檢假', yearDays: 7, firstUse: true },
+    { key: 'paternity', name: '陪產檢及陪產假', yearDays: 7, firstUse: true },
+    { key: 'aboriginal', name: '原住民族歲時祭儀假', yearDays: 1, only: 'abo' }
   ];
   var FUNERAL = [
     { key: 'p', name: '父母、養父母、繼父母、配偶', days: 8 },
-    { key: 'g', name: '祖父母、子女、配偶之父母', days: 6 },
+    { key: 'g', name: '祖父母、子女、配偶之父母、配偶之養父母或繼父母', days: 6 },
     { key: 'o', name: '曾祖父母、兄弟姊妹、配偶之祖父母', days: 3 }
   ];
   function leaveType(k) { return LEAVE_TYPES.filter(function (t) { return t.key === k; })[0]; }
+  // 婚假：結婚日前 10 天起 3 個月內；喪假：死亡日起 100 天內
+  function eventWindowOf(key, ev) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ev || '')) return null;
+    if (key === 'marriage') return { from: addDays(ev, -10), to: shiftDate(ev, 0, 3) };
+    if (key === 'funeral') return { from: ev, to: addDays(ev, 99) };
+    return null;
+  }
+  // 申請附件：[{ id, name, mime }]，最多 5 個
+  function cleanFiles(list) {
+    return (Array.isArray(list) ? list : []).slice(0, 5).map(function (f) {
+      return { id: String(f && f.id || '').replace(/[^\w-]/g, '').slice(0, 80), name: String(f && f.name || '').slice(0, 80), mime: String(f && f.mime || '').slice(0, 60) };
+    }).filter(function (f) { return f.id; });
+  }
   function utc(d) { var p = d.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
   function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
   function shiftDate(date, y, m) { var p = date.split('-'); return isoOf(Date.UTC(+p[0] + y, +p[1] - 1 + m, +p[2])); }
@@ -290,7 +303,7 @@ var ATT = (function () {
         mine: !!(viewer && viewer.id === r.staffId), data: r.data, pendingData: r.pendingData || null, mode: r.mode || '',
         status: r.status, hrOk: !!r.hrOk, stageLabel: r.status === 'pending' ? STAGE_LABEL[r.stages[r.stage]] : '',
         waitingFor: who ? en(who) : '', canDecide: !!(viewer && who && who === viewer.id), history: r.history || [],
-        createdAt: r.createdAt, summary: summary(r)
+        createdAt: r.createdAt, summary: summary(r), label: title(r) + ((r.pendingData || r.data || {}).date || (r.pendingData || r.data || {}).fromDate ? '・' + md((r.pendingData || r.data).date || (r.pendingData || r.data).fromDate) : '')
       };
     }
 
@@ -307,20 +320,35 @@ var ATT = (function () {
       var compIn = 0;
       mine.filter(function (r) { return r.type === 'ot' && r.status === 'approved' && r.data.comp && String(r.data.date).slice(0, 4) === String(year); })
         .forEach(function (r) { compIn += Number(r.data.minutes || 0); });
-      return LEAVE_TYPES.map(function (t) {
+      // 曾經申請過的假別（產假、婚假這類第一次申請時才開啟）
+      var ever = {};
+      mine.filter(function (r) { return r.type === 'leave' && live(r); }).forEach(function (r) { ever[dataOf(r).leaveType] = true; });
+      return LEAVE_TYPES.filter(function (t) { return eligible(p, t); }).map(function (t) {
         var u = used[t.key] || 0, total = null, unit = 'year';
-        if (t.key === 'annual') total = annualMinutes(p.hireDate, year) + adj('annual');
-        else if (t.key === 'comp') total = compIn + adj('comp');
+        if (t.key === 'annual') total = annualMinutes(p.hireDate, year);
+        else if (t.key === 'comp') total = compIn;
         else if (t.monthDays) { total = t.monthDays * DAY; unit = 'month'; u = used.menstrualMonth || 0; }
         else if (t.yearDays) total = t.yearDays * DAY;
+        else if (t.days) { total = t.days * DAY; unit = 'event'; }
+        else if (t.relation) unit = 'event';
+        var a = adj(t.key);
+        if (total !== null) total += a;
         var remain = total === null ? null : total - u;
         // 家庭照顧假併入事假計算：兩種合計一年 14 天
-        if (t.key === 'personal') remain = Math.min(remain, 14 * DAY - (used.personal || 0) - (used.family || 0));
-        if (t.key === 'family') remain = Math.min(remain, 14 * DAY - (used.personal || 0) - (used.family || 0));
-        return { key: t.key, name: t.name, total: total, used: u, remaining: remain === null ? null : Math.max(0, remain), unit: unit,
-          label: remain === null ? '' : (unit === 'month' ? '本月剩 ' : '剩 ') + fmtDays(Math.max(0, remain)) };
+        if (t.key === 'personal' || t.key === 'family') remain = Math.min(remain, 14 * DAY + adj('personal') - (used.personal || 0) - (used.family || 0));
+        var closed = !!t.firstUse && !ever[t.key] && !a;
+        var period = unit === 'month' ? '本月' : t.key === 'comp' ? '12/31 前' : unit === 'event' ? '' : '今年';
+        return { key: t.key, name: t.name, total: total, used: u, adjust: a, remaining: remain === null ? null : Math.max(0, remain), unit: unit,
+          closed: closed, legal: t.days || t.yearDays || t.monthDays || 0, period: period, event: t.event || '' };
       });
     }
+    function eligible(p, t) {
+      if (t.only === 'F') return p.gender === 'F';
+      if (t.only === 'abo') return !!p.aboriginal;
+      return true;
+    }
+    // 婚假、喪假：依事件日期計算期限與已用時數
+    function eventWindow(t, ev) { return eventWindowOf(t.key, ev); }
 
     // ---------- 各種申請單的檢查 ----------
     function noFuture(date, time, now, msg) {
@@ -343,7 +371,9 @@ var ATT = (function () {
       var t = leaveType(String(data.leaveType || ''));
       if (!t) throw new Error('請選擇假別');
       var x = { leaveType: t.key, fromDate: String(data.fromDate || ''), fromTime: String(data.fromTime || ''), toDate: String(data.toDate || ''),
-        toTime: String(data.toTime || ''), relation: String(data.relation || ''), reason: String(data.reason || '').trim().slice(0, 200) };
+        toTime: String(data.toTime || ''), relation: String(data.relation || ''), eventDate: String(data.eventDate || ''),
+        reason: String(data.reason || '').trim().slice(0, 200), files: cleanFiles(data.files) };
+      if (!eligible(me, t)) throw new Error('你沒有' + t.name);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(x.fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(x.toDate)) throw new Error('請選擇日期');
       if (!/^\d{2}:\d{2}$/.test(x.fromTime) || !/^\d{2}:\d{2}$/.test(x.toTime)) throw new Error('請選擇時間');
       if (toMin(x.fromTime) % 30 || toMin(x.toTime) % 30) throw new Error('請假以 30 分鐘為單位');
@@ -354,13 +384,28 @@ var ATT = (function () {
       else if (x.fromDate < now.date || (x.fromDate === now.date && now.time.slice(0, 5) > '09:30')) throw new Error('請假要在當天 9:30 前送出');
       x.minutes = leaveMinutes(x.fromDate, x.fromTime, x.toDate, x.toTime, isWorkdayFor(me));
       if (!x.minutes) throw new Error('這段時間不是上班時間');
-      if (t.relation) {
-        var rel = FUNERAL.filter(function (f) { return f.key === x.relation; })[0];
-        if (!rel) throw new Error('請選擇親屬關係');
-        if (x.minutes > rel.days * DAY) throw new Error('這個親屬關係的喪假最多 ' + rel.days + ' 天');
+      if (t.event) {
+        // 婚假（結婚日前 10 天起 3 個月內）、喪假（死亡日起 100 天內，可分次）：依同一事件計算
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(x.eventDate)) throw new Error('請選擇' + t.event);
+        var w = eventWindow(t, x.eventDate);
+        if (x.fromDate < w.from || x.toDate > w.to) throw new Error(t.name + '要在 ' + w.from.replace(/-/g, '/') + ' 到 ' + w.to.replace(/-/g, '/') + ' 之間請完');
+        var cap = t.days ? t.days * DAY : 0;
+        if (t.relation) {
+          var rel = FUNERAL.filter(function (f) { return f.key === x.relation; })[0];
+          if (!rel) throw new Error('請選擇親屬');
+          cap = rel.days * DAY;
+        }
+        var usedEv = 0;
+        reqs().forEach(function (r) {
+          if (r.id === skipId || r.staffId !== me.id || r.type !== 'leave' || !live(r)) return;
+          var d = dataOf(r);
+          if (d.leaveType === t.key && d.eventDate === x.eventDate && (!t.relation || d.relation === x.relation)) usedEv += Number(d.minutes || 0);
+        });
+        if (x.minutes > cap - usedEv) throw new Error(t.name + '只剩 ' + fmtDays(Math.max(0, cap - usedEv)));
+      } else {
+        var b = balances(me, x.fromDate.slice(0, 4), skipId, x.fromDate.slice(0, 7)).filter(function (y) { return y.key === t.key; })[0];
+        if (b && b.remaining !== null && x.minutes > b.remaining) throw new Error(t.name + '只剩 ' + fmtDays(b.remaining));
       }
-      var b = balances(me, x.fromDate.slice(0, 4), skipId, x.fromDate.slice(0, 7)).filter(function (y) { return y.key === t.key; })[0];
-      if (b && b.remaining !== null && x.minutes > b.remaining) throw new Error(t.name + '只剩 ' + fmtDays(b.remaining));
       var clash = reqs().filter(function (r) {
         if (r.id === skipId || r.staffId !== me.id || r.type !== 'leave' || !live(r)) return false;
         var d = dataOf(r);
@@ -533,6 +578,15 @@ var ATT = (function () {
         var now = env.now();
         return balances(me, String(year || now.date.slice(0, 4)), '', now.date.slice(0, 7));
       },
+      // HR：看某個人的假別額度（出勤設定）
+      balancesFor: function (me, staffId, year) {
+        if (me.role !== 'admin') throw new Error('沒有權限');
+        var p = person(staffId);
+        if (!p) throw new Error('找不到這位員工');
+        var now = env.now();
+        return { staffId: p.id, staff: fullName(p), hireDate: p.hireDate || '', gender: p.gender || '', aboriginal: !!p.aboriginal,
+          balances: balances(p, String(year || now.date.slice(0, 4)), '', now.date.slice(0, 7)) };
+      },
       saveFix: function (me, id, data) { return saveReq(me, id, 'fix', data); },
       saveLeave: function (me, id, data) { return saveReq(me, id, 'leave', data); },
       saveOt: function (me, id, data) { return saveReq(me, id, 'ot', data); },
@@ -618,7 +672,7 @@ var ATT = (function () {
         var people = env.people();
         return reqs().filter(function (r) { var p = person(r.staffId); return p && currentApprover(r, p, people) === me.id; }).length;
       },
-      // 待辦事項：這個月和上個月還沒處理的異常、被退件的申請
+      // 待辦事項：這個月和上個月還沒處理的出勤異常
       todos: function (me) {
         var now = env.now();
         var out = [];
@@ -628,13 +682,10 @@ var ATT = (function () {
           var all = punchesOf(me.id, days[0], days[days.length - 1] || days[0]);
           days.forEach(function (dt) {
             var d = dayOf(me, dt, now, all);
-            if (d.status === 'abnormal' && !d.pendingFix) out.push({ kind: 'abnormal', date: dt, title: md(dt) + ' ' + d.reasons[0] });
+            if (d.status === 'abnormal' && !d.pendingFix) out.push({ kind: 'abnormal', date: dt, title: md(dt) + ' 出勤異常' });
           });
         });
         out.sort(function (a, b) { return b.date.localeCompare(a.date); });
-        reqs().filter(function (r) { return r.staffId === me.id && r.status === 'rejected'; }).forEach(function (r) {
-          out.unshift({ kind: 'rejected', id: r.id, title: title(r) + '被退件' });
-        });
         return out;
       }
     };
@@ -643,7 +694,7 @@ var ATT = (function () {
   return {
     RULE: RULE, FLOWS: FLOWS, KIND_LABEL: KIND_LABEL, TYPE_LABEL: TYPE_LABEL, STAGE_LABEL: STAGE_LABEL, LEAVE_TYPES: LEAVE_TYPES, FUNERAL: FUNERAL,
     toMin: toMin, fmtMin: fmtMin, fmtDur: fmtDur, fmtDays: fmtDays, addDays: addDays, weekday: weekday, monthDays: monthDays,
-    expectedOut: expectedOut, dayInfo: dayInfo, buildDay: buildDay, effective: effective, annualMinutes: annualMinutes, leaveMinutes: leaveMinutes,
+    expectedOut: expectedOut, dayInfo: dayInfo, buildDay: buildDay, effective: effective, annualMinutes: annualMinutes, leaveMinutes: leaveMinutes, eventWindow: eventWindowOf,
     service: service
   };
 })();

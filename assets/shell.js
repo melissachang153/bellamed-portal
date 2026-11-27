@@ -9,6 +9,17 @@
   function token() { return BM.store('staffToken'); }
   function isAdmin() { return !!(P && P.me && P.me.admin); }
   // 會收到審核單的人：管理員（HR）、主管、財務
+  function isHR() { return isAdmin() || !!(P && P.me && P.me.role === 'admin'); }
+  // 各功能的子分頁（顯示在左側選單，點功能名稱展開）
+  function subsOf(key) {
+    var S = {
+      events: [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '報名修正'], ['history', '歷年活動']].concat(isAdmin() ? [['settings', '設定']] : []),
+      attendance: [['detail', '出勤明細'], ['apply', '申請']].concat(isHR() ? [['settings', '出勤設定']] : []),
+      settings: [['staff', '人員'], ['perm', '選單與權限'], ['line', 'LINE 與推播'], ['fb', '問題回報']]
+    };
+    return S[key] || [];
+  }
+  BM.subsOf = subsOf;
   function isApprover() { return isAdmin() || !!(P && P.me && ['admin', 'manager', 'finance'].indexOf(P.me.role) >= 0); }
 
   // ---------------- 登入／登出 ----------------
@@ -60,7 +71,9 @@
     BM.store('adminToken', r.staff && r.staff.admin ? r.token : null);
   }
 
+  function hideSplash() { var s = document.getElementById("splash"); if (s && !s.classList.contains("gone")) { s.classList.add("gone"); setTimeout(function () { s.remove(); }, 300); } }
   function showOnly(id) {
+    if (id !== "appView") hideSplash();
     ['loginView', 'pwView', 'appView'].forEach(function (v) { $('#' + v).hidden = v !== id; });
     // 版本列：登入後放在內容欄的最下面（不另外撐高頁面），登入前放在頁面最下面
     var f = document.querySelector('.site-foot');
@@ -143,12 +156,14 @@
     var first = true;
     await BM.swr('portal', function () { return BM.api('portal', { token: token() }); }, function (p) {
       P = p;
-      BM.store('staff', p.me);
+      BM.store("staff", p.me);
       drawFrame();
+      hideSplash();
       // 第一次（或資料有變）才重畫內容；正在看的功能不要被打斷
       if (first || currentRoute() === 'home') route();
       first = false;
     });
+    hideSplash();
   }
 
   function roleLabel(me) {
@@ -192,15 +207,34 @@
     av.classList.toggle('pic', !!has);
     av.innerHTML = has ? BM.avatars.svg(me.avatar, 30) : av.dataset.def;
     var fold = BM.store('navFold') || {};
+    var groups = P.menu.slice();
+    if (isAdmin()) groups.push({ name: '後台設定', admin: true, items: [{ key: 'settings', name: '後台設定', ready: true }] });
     $('#sideNav').innerHTML =
-      P.menu.map(function (g) {
-        return '<div class="nav-sec' + (fold[g.name] ? ' folded' : '') + '">' +
+      groups.map(function (g) {
+        return '<div class="nav-sec' + (fold[g.name] ? ' folded' : '') + (g.admin ? ' nav-adm' : '') + '">' +
           '<button type="button" class="nav-group" aria-expanded="' + !fold[g.name] + '"><span>' + esc(g.name) + '</span><span class="chev" aria-hidden="true"></span></button>' +
           '<div class="nav-items">' + g.items.map(function (it) {
+            var subs = subsOf(it.key);
+            if (g.admin) return subs.map(function (s) { return '<a href="#/settings/' + s[0] + '" data-r="settings/' + s[0] + '" class="nav-item nav-sub0">' + esc(s[1]) + '</a>'; }).join('');
+            if (subs.length && it.ready) {
+              return '<button type="button" class="nav-item nav-mod" data-mod="' + it.key + '">' + icon(it.key) + '<span>' + esc(it.name) + '</span><span class="car" aria-hidden="true"></span></button>' +
+                '<div class="nav-subs" data-subs="' + it.key + '">' + subs.map(function (s) {
+                  return '<a href="#/' + it.key + '/' + s[0] + '" data-r="' + it.key + '/' + s[0] + '" class="nav-item nav-sub">' + esc(s[1]) + '</a>';
+                }).join('') + '</div>';
+            }
             return '<a href="#/' + it.key + '" data-r="' + it.key + '" class="nav-item">' + icon(it.key) + '<span>' + esc(it.name) + '</span>' +
               (it.ready ? '' : '<span class="soon">即將推出</span>') + '</a>';
           }).join('') + '</div></div>';
       }).join('');
+    $$('#sideNav .nav-mod').forEach(function (b) {
+      b.onclick = function () {
+        var open = BM.store('navOpen') || {}, k = b.dataset.mod;
+        var now = !b.parentNode.querySelector('[data-subs="' + k + '"]').classList.contains('open');
+        if (now) open[k] = 1; else delete open[k];
+        BM.store('navOpen', open);
+        markNav();
+      };
+    });
     $$('#sideNav .nav-group').forEach(function (b) {
       b.onclick = function () {
         var sec = b.parentNode, name = b.firstChild.textContent, f = BM.store('navFold') || {};
@@ -227,8 +261,17 @@
   $('#sideMask').onclick = function () { setSide(false); };
   function markNav() {
     document.body.classList.remove('side-open');
-    var r = currentRoute().split('/')[0];
-    $$('#sideNav .nav-item').forEach(function (a) { a.classList.toggle('on', a.dataset.r === r); });
+    var parts = currentRoute().split('/'), r = parts[0];
+    var full = r + '/' + (parts[1] || (subsOf(r)[0] || [''])[0]);
+    var open = BM.store('navOpen') || {};
+    $$('#sideNav a.nav-item').forEach(function (a) { a.classList.toggle('on', a.dataset.r === r || a.dataset.r === full); });
+    $$('#sideNav .nav-mod').forEach(function (b) {
+      var k = b.dataset.mod, isOpen = !!open[k] || k === r;
+      b.classList.toggle('open', isOpen);
+      b.classList.toggle('cur', k === r);
+      b.setAttribute('aria-expanded', String(isOpen));
+      b.parentNode.querySelector('[data-subs="' + k + '"]').classList.toggle('open', isOpen);
+    });
     $$('#sideNav .nav-sec').forEach(function (s) { s.classList.toggle('has-on', !!s.querySelector('.nav-item.on')); });
     var sub = currentRoute();
     $$('#bottomNav a').forEach(function (a) {
@@ -241,8 +284,7 @@
   function openUserMenu() {
     var me = P.me;
     var items = [['me', 'me', '我的']];
-    if (isApprover()) items.push(['review', 'review', '待我審核' + (P.home.pending ? '（' + P.home.pending + '）' : '')]);
-    if (isAdmin()) items.push(['settings', 'admin', '系統設定']);
+    if (isAdmin()) items.push(['settings', 'admin', '後台設定']);
     var m = BM.modal('<h2>' + esc(me.name) + (roleLabel(me) ? ' <span class="badge gray">' + roleLabel(me) + '</span>' : '') + '</h2>' +
       '<div class="menu-list">' + items.map(function (i) {
         return '<button class="menu-row" data-go="' + i[0] + '">' + icon(i[1]) + esc(i[2]) + '</button>';
@@ -275,8 +317,10 @@
     var mod = moduleOf(parts[0]);
     if (!mod) return BM.go('home');
     if (mod.ready && BM.modules[mod.key]) {
-      box.innerHTML = '<div class="page-head"><h2>' + esc(mod.name) + '</h2></div><div id="modRoot"></div>';
-      return BM.modules[mod.key].mount($('#modRoot'), P.me, parts[1]);
+      var subs = subsOf(mod.key), alias = mod.key === 'attendance' ? { punch: 'detail', records: 'detail', team: 'detail', fix: 'apply', leave: 'apply', ot: 'apply', calendar: 'settings' } : {};
+      var sub = subs.filter(function (s) { return s[0] === (alias[parts[1]] || parts[1]); })[0] || subs[0];
+      box.innerHTML = '<div class="page-head"><h2>' + esc(sub ? sub[1] : mod.name) + '</h2></div><div id="modRoot"></div>';
+      return BM.modules[mod.key].mount($('#modRoot'), P.me, sub && !alias[parts[1]] ? sub[0] : parts[1]);
     }
     renderSoon(box, mod);
   }
@@ -291,7 +335,7 @@
   // 首頁的清單卡片：標題、件數、全部 ›，每筆只有標題
   function listCard(title, ico, items, href, row) {
     return '<div class="card home-card home-list"><div class="hc-title">' + icon(ico) + title +
-      (items.length ? '<span class="cnt">' + items.length + '</span>' : '') + '<a class="small hc-all" href="' + href + '">全部 ›</a></div>' +
+      (items.length && title !== '我的申請' ? '<span class="cnt">' + items.length + '</span>' : '') + '<a class="small hc-all" href="' + href + '">全部 ›</a></div>' +
       (items.length ? items.slice(0, 5).map(row).join('') : '<div class="hl-empty">—</div>') + '</div>';
   }
   function todoAction(t) {
@@ -316,6 +360,16 @@
     if (moduleOf('attendance')) html += listCard('我的申請', 'apply', mine, '#/attendance/apply', function (r) {
       return '<a href="#" class="hl-row" data-mine="' + esc(r.id) + '"><span class="grow">' + esc(r.title) + '</span>' + chip(r) + '<span class="go">›</span></a>';
     });
+    if (moduleOf('news') && h.news) {
+      var N = BM.modules.news;
+      html += '<div class="card home-card home-list home-news"><div class="hc-title">' + icon('news') + '最新公告<a class="small hc-all" href="#/news">全部 ›</a></div>' +
+        (h.news.length ? h.news.map(function (n) {
+          var unread = n.kind === 'news' && N && !N.isRead(n.id);
+          return '<a class="ann-row" href="#/' + (n.kind === 'rule' ? 'rules/' : 'news/') + esc(n.id) + '">' +
+            (n.pinned ? '<span class="tag pin">置頂</span>' : '<span class="tag">' + (n.kind === 'rule' ? '規章' : '公告') + '</span>') +
+            '<span class="grow">' + esc(n.title) + '</span><span class="d">' + esc(n.date.slice(5).replace('-', '/')) + '</span><span class="new' + (unread ? '' : ' off') + '"></span></a>';
+        }).join('') : '<div class="hl-empty">—</div>') + '</div>';
+    }
     html += '</div>';
     if (h.events) {
       html += '<div class="section-title">即將舉行的醫學會</div>' + (h.events.length ? h.events.map(function (e) {
@@ -453,89 +507,113 @@
   var SET_TABS = [['staff', '人員'], ['perm', '選單與權限'], ['line', 'LINE 與推播'], ['fb', '問題回報']];
   function renderSettings(box, tab) {
     if (!SET_TABS.some(function (t) { return t[0] === tab; })) tab = 'staff';
-    box.innerHTML = '<div class="page-head"><h2>系統設定</h2></div>' +
-      '<nav class="tabs">' + SET_TABS.map(function (t) {
-        return '<button data-st="' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '">' + t[1] + '</button>';
-      }).join('') + '</nav><div class="mod-body" id="setRoot"></div>';
-    $$('[data-st]', box).forEach(function (b) { b.onclick = function () { BM.go('settings/' + b.dataset.st); }; });
+    var cur = SET_TABS.filter(function (t) { return t[0] === tab; })[0];
+    box.innerHTML = '<div class="page-head"><h2>' + cur[1] + '</h2></div><div class="mod-body" id="setRoot"></div>';
     var root = $('#setRoot');
     if (tab === 'perm') return renderPerm(root);
     if (tab === 'staff') return BM.admin.events.mount(root, ['staff'], 'staff');
     return BM.admin.events.mount(root, ['settings'], 'settings', { setMode: tab });
   }
 
-  // 選單與權限：主管／行政／職員三組；點組別整組全選，展開可以逐人勾選
+  // 選單與權限：選單分組 → 功能 → 子分頁。功能依主管／行政／職員勾選誰能用；每個子分頁可設定誰能匯出
   async function renderPerm(root) {
     root.innerHTML = '<div id="permAdm"><div class="card empty">讀取中…</div></div>';
     var A = await BM.run(function () { return BM.api('portalAdmin', { token: BM.store('adminToken') }); });
     var menu = JSON.parse(JSON.stringify(A.menu));
-    var allow = {};
-    A.keys.forEach(function (k) { allow[k.key] = {}; (A.allow[k.key] || []).forEach(function (id) { allow[k.key][id] = true; }); });
-    var open = null; // 'key|group' 展開中
-    var showMenu = false, showPages = false;
+    var allow = {}, exportOn = {};
+    var load = function () {
+      allow = {}; exportOn = JSON.parse(JSON.stringify(A.exportOn || {}));
+      Object.keys(A.allow).forEach(function (k) { allow[k] = {}; A.allow[k].forEach(function (id) { allow[k][id] = true; }); });
+    };
+    load();
+    var open = null; // 展開中的格子：'key|group' 或 'export:…'
+    var shut = {};   // 收起的選單分組
+    var showMenu = false;
     var people = function (g) { return A.people.filter(function (p) { return p.group === g; }); };
-    var groupOf = function (k) { var g = menu.filter(function (x) { return x.items.indexOf(k) >= 0; })[0]; return g ? g.name : '—'; };
     var modName = function (k) { var m = A.modules.filter(function (x) { return x.key === k; })[0]; return m ? m.name : k; };
-    function cell(k, g) {
-      var ps = people(g), on = ps.filter(function (p) { return allow[k][p.id]; }).length;
-      var st = !ps.length ? '' : on === ps.length ? 'on' : on ? 'part' : '';
-      return '<td class="num"><span class="gk' + (open === k + '|' + g ? ' open' : '') + '">' +
-        '<button type="button" class="ck ' + st + '" data-gall="' + k + '|' + g + '" aria-label="整組"></button>' +
-        '<button type="button" class="gk-n" data-gopen="' + k + '|' + g + '">' + on + '/' + ps.length + ' ' + (open === k + '|' + g ? '▾' : '▸') + '</button></span></td>';
+    var ck = function (on, all, attr) { return '<button type="button" class="ck ' + (all && on === all ? 'on' : on ? 'part' : '') + '" ' + attr + ' aria-label="勾選"></button>'; };
+    var cnt = function (k, list) { return list.filter(function (p) { return allow[k] && allow[k][p.id]; }).length; };
+    var nameOf = function (p) { return esc((p.name ? p.name + ' ' : '') + p.en); };
+    function personBox(k, p) {
+      var on = !!(allow[k] && allow[k][p.id]);
+      return '<label class="chk' + (on ? ' on' : '') + '"><input type="checkbox" data-one="' + k + '|' + p.id + '"' + (on ? ' checked' : '') + '>' + nameOf(p) + '</label>';
+    }
+    function whoList(k) {
+      return A.groups.map(function (g) {
+        var ps = people(g[0]);
+        if (!ps.length) return '';
+        return '<div class="who-row"><span class="who-h">' + ck(cnt(k, ps), ps.length, 'data-gall="' + k + '|' + g[0] + '"') + g[1] + '</span>' +
+          '<div class="who">' + ps.map(function (p) { return personBox(k, p); }).join('') + '</div></div>';
+      }).join('');
+    }
+    function modCell(k, g) {
+      var ps = people(g), on = cnt(k, ps);
+      if (!ps.length) return '<td class="muted">—</td>';
+      return '<td><span class="gk' + (open === k + '|' + g ? ' open' : '') + '">' + ck(on, ps.length, 'data-gall="' + k + '|' + g + '"') +
+        '<button type="button" class="gk-n" data-open="' + k + '|' + g + '">' + on + '/' + ps.length + ' ' + (open === k + '|' + g ? '▾' : '▸') + '</button></span></td>';
+    }
+    function expCell(ek) {
+      if (!exportOn[ek]) return '<td><span class="gk">' + ck(0, 1, 'data-exp="' + ek + '"') + '<span class="gk-n">不開放</span></span></td>';
+      var n = cnt(ek, A.people);
+      return '<td><span class="gk' + (open === ek ? ' open' : '') + '">' + ck(1, 1, 'data-exp="' + ek + '"') +
+        '<button type="button" class="gk-n" data-open="' + ek + '">' + n + ' 人 ' + (open === ek ? '▾' : '▸') + '</button></span></td>';
     }
     function draw() {
       var el = $('#permAdm');
       if (!el) return;
-      var groups = A.groups;
-      var rows = A.keys.map(function (k) {
-        var r = '<tr' + (k.key === 'export' ? ' class="sp"' : '') + '><td>' + esc(k.name) + '</td><td class="muted">' + esc(k.key === 'export' ? '—' : groupOf(k.key)) + '</td>' + groups.map(function (g) { return cell(k.key, g[0]); }).join('') + '</tr>';
-        if (open && open.split('|')[0] === k.key) {
-          var g = open.split('|')[1];
-          r += '<tr class="drop"><td colspan="' + (groups.length + 2) + '"><div class="who">' + people(g).map(function (p) {
-            return '<label class="chk' + (allow[k.key][p.id] ? ' on' : '') + '"><input type="checkbox" data-one="' + k.key + '|' + p.id + '"' + (allow[k.key][p.id] ? ' checked' : '') + '>' + esc((p.name ? p.name + ' ' : '') + p.en) + '</label>';
-          }).join('') + '</div></td></tr>';
-        }
+      var cols = A.groups.length + 2;
+      var rows = menu.map(function (g, gi) {
+        var r = '<tr class="grp"><td colspan="' + cols + '"><button type="button" class="grp-t" data-shut="' + gi + '">' + (shut[gi] ? '▸ ' : '▾ ') + esc(g.name) + '</button></td></tr>';
+        if (shut[gi]) return r;
+        g.items.forEach(function (k) {
+          r += '<tr class="mod"><td>' + esc(modName(k)) + '</td>' + A.groups.map(function (x) { return modCell(k, x[0]); }).join('') + '<td></td></tr>';
+          if (open && open.indexOf(k + '|') === 0) {
+            r += '<tr class="drop"><td colspan="' + cols + '"><div class="who">' + people(open.split('|')[1]).map(function (p) { return personBox(k, p); }).join('') + '</div></td></tr>';
+          }
+          (A.subpages[k] || []).forEach(function (s) {
+            var ek = 'export:' + k + '/' + s[0];
+            r += '<tr class="subp"><td>' + esc(s[1]) + '</td>' + A.groups.map(function () { return '<td></td>'; }).join('') + expCell(ek) + '</tr>';
+            if (open === ek && exportOn[ek]) r += '<tr class="drop"><td colspan="' + cols + '">' + whoList(ek) + '</td></tr>';
+          });
+        });
         return r;
       }).join('');
-      el.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="grid perm2"><thead><tr><th>功能</th><th>選單分組</th>' +
-        groups.map(function (g) { return '<th class="num">' + g[1] + ' <small>' + people(g[0]).length + '</small></th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<div class="card"><div class="set-t" style="display:flex;align-items:center">選單分組與順序<button class="btn small ghost" id="mToggle" style="margin-left:auto">' + (showMenu ? '收起' : '調整') + '</button></div>' +
-        (showMenu ? menuEditor() : '') + '</div>' +
-        '<div class="card"><div class="set-t" style="display:flex;align-items:center">醫學會分頁權限<button class="btn small ghost" id="pToggle" style="margin-left:auto">' + (showPages ? '收起' : '調整') + '</button></div>' +
-        (showPages ? '<table class="grid"><thead><tr><th>分頁</th><th class="num">主管</th><th class="num">職員</th></tr></thead><tbody>' +
-        [['events', '活動報名'], ['records', '參加紀錄'], ['corrections', '修正申請']].map(function (p) {
-          return '<tr><td>' + p[1] + '</td>' + ['manager', 'staff'].map(function (r) {
-            return '<td class="num"><input type="checkbox" class="cb" data-pp="' + r + '|' + p[0] + '"' + (A.pagePerms[r][p[0]] ? ' checked' : '') + '></td>';
-          }).join('') + '</tr>';
-        }).join('') + '</tbody></table>' : '') + '</div>' +
-        '<div class="btn-row"><button class="btn block" id="pSave">儲存</button></div>';
+      el.innerHTML = '<div class="card" style="padding:0;overflow:auto"><table class="grid perm2"><thead><tr><th>選單</th>' +
+        A.groups.map(function (g) { return '<th>' + g[1] + ' <small>' + people(g[0]).length + '</small></th>'; }).join('') + '<th>可匯出</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        (showMenu ? '<div class="card">' + menuEditor() + '</div>' : '') +
+        '<div class="btn-row"><button class="btn ghost" id="mToggle">' + (showMenu ? '收起分組設定' : '調整選單分組與順序') + '</button><span class="grow"></span><button class="btn" id="pSave">儲存</button></div>';
+      $$('[data-shut]', el).forEach(function (b) { b.onclick = function () { shut[b.dataset.shut] = !shut[b.dataset.shut]; draw(); }; });
       $$('[data-gall]', el).forEach(function (b) {
         b.onclick = function () {
           var p = b.dataset.gall.split('|'), ps = people(p[1]);
+          allow[p[0]] = allow[p[0]] || {};
           var all = ps.every(function (x) { return allow[p[0]][x.id]; });
           ps.forEach(function (x) { allow[p[0]][x.id] = !all; });
           draw();
         };
       });
-      $$('[data-gopen]', el).forEach(function (b) { b.onclick = function () { open = open === b.dataset.gopen ? null : b.dataset.gopen; draw(); }; });
-      $$('[data-one]', el).forEach(function (c) { c.onchange = function () { var p = c.dataset.one.split('|'); allow[p[0]][p[1]] = c.checked; draw(); }; });
-      $$('[data-pp]', el).forEach(function (c) {
-        c.onchange = async function () {
-          var pp = JSON.parse(JSON.stringify(A.pagePerms)), k = c.dataset.pp.split('|');
-          pp[k[0]][k[1]] = c.checked;
-          try { await BM.run(function () { return BM.api('savePerms', { token: BM.store('adminToken'), perms: pp }); }); A.pagePerms = pp; BM.toast('已儲存'); }
-          catch (e) { c.checked = !c.checked; }
+      $$('[data-exp]', el).forEach(function (b) {
+        b.onclick = function () {
+          var k = b.dataset.exp;
+          exportOn[k] = !exportOn[k];
+          if (exportOn[k] && !cnt(k, A.people)) { allow[k] = {}; A.people.forEach(function (p) { if (p.group !== 'staff') allow[k][p.id] = true; }); }
+          open = exportOn[k] ? k : null;
+          draw();
         };
       });
+      $$('[data-open]', el).forEach(function (b) { b.onclick = function () { open = open === b.dataset.open ? null : b.dataset.open; draw(); }; });
+      $$('[data-one]', el).forEach(function (c) {
+        c.onchange = function () { var p = c.dataset.one.split('|'); allow[p[0]] = allow[p[0]] || {}; allow[p[0]][p[1]] = c.checked; draw(); };
+      });
       $('#mToggle', el).onclick = function () { showMenu = !showMenu; draw(); };
-      $('#pToggle', el).onclick = function () { showPages = !showPages; draw(); };
       if (showMenu) bindMenuEditor(el);
       $('#pSave', el).onclick = async function () {
         if (menu.some(function (g) { return !String(g.name).trim(); })) return BM.toast('分組名稱不能空白', true);
         var out = {};
-        A.keys.forEach(function (k) { out[k.key] = Object.keys(allow[k.key]).filter(function (id) { return allow[k.key][id]; }); });
-        A = await BM.run(function () { return BM.api('saveMenu', { token: BM.store('adminToken'), menu: menu, allow: out }); });
+        Object.keys(allow).forEach(function (k) { out[k] = Object.keys(allow[k]).filter(function (id) { return allow[k][id]; }); });
+        A = await BM.run(function () { return BM.api('saveMenu', { token: BM.store('adminToken'), menu: menu, allow: out, exportOn: exportOn }); });
         menu = JSON.parse(JSON.stringify(A.menu));
+        load();
         BM.toast('已儲存');
         draw();
         refreshPortal();

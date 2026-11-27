@@ -201,7 +201,7 @@ var BM = (function () {
   }
 
   // ---- 版本與問題回報 ----
-  var VERSION = '2.4.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
+  var VERSION = '2.5.0'; // 與後端 gas/Code.gs 的 BACKEND_VERSION 一律相同
   var UPDATED = '2026/11/27';
 
   function footer(pageName, whoFn) {
@@ -214,13 +214,30 @@ var BM = (function () {
       var who = (whoFn && whoFn()) || '';
       var m = modal('<h2>回報問題</h2>' +
         '<label class="f" for="rpWho">姓名</label><input class="input" id="rpWho" value="' + esc(who) + '" maxlength="40">' +
-        '<label class="f" for="rpMsg">問題描述</label><textarea class="input" id="rpMsg" maxlength="1000" placeholder="例如：按「儲存報名」後一直轉圈"></textarea>' +
+        '<label class="f" for="rpType">問題類型</label><select class="input" id="rpType">' +
+        ['畫面問題', '數據問題', '優化建議', '其他'].map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select>' +
+        '<label class="f" for="rpMsg">內容</label><textarea class="input" id="rpMsg" maxlength="1000"></textarea>' +
+        '<label class="f">附件</label><div class="att-files" id="rpFile"><label class="file-add">＋ 截圖或照片<input type="file" id="rpPick" accept="image/*" hidden></label></div>' +
         '<div class="btn-row"><button class="btn block" id="rpSend">送出</button></div>');
+      var shot = null;
+      m.el.querySelector('#rpPick').onchange = function () {
+        var file = this.files[0];
+        if (!file) return;
+        if (file.size > 8 * 1024 * 1024) return toast('截圖太大（上限 8 MB）', true);
+        var r = new FileReader();
+        r.onload = function () {
+          shot = { name: file.name, mime: file.type, base64: String(r.result).split(',')[1] };
+          m.el.querySelector('#rpFile').innerHTML = '<span class="file-chip">' + esc(file.name) + '<button type="button" id="rpRm" aria-label="移除">×</button></span>';
+          m.el.querySelector('#rpRm').onclick = function () { shot = null; m.el.querySelector('#rpFile').innerHTML = '<span class="small muted">已移除</span>'; };
+        };
+        r.readAsDataURL(file);
+      };
       m.el.querySelector('#rpSend').onclick = async function () {
         var msg = m.el.querySelector('#rpMsg').value.trim();
-        if (!msg) return toast('請描述遇到的問題', true);
+        if (!msg) return toast('請填寫內容', true);
         await run(function () {
-          return api('reportIssue', { who: m.el.querySelector('#rpWho').value.trim(), page: pageName, message: msg,
+          return api('reportIssue', { who: m.el.querySelector('#rpWho').value.trim(), page: pageName, message: msg, type: m.el.querySelector('#rpType').value,
+            fileName: shot ? shot.name : '', mimeType: shot ? shot.mime : '', base64: shot ? shot.base64 : '',
             version: VERSION, userAgent: navigator.userAgent });
         });
         toast('已送出，謝謝你的回報');
