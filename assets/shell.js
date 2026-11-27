@@ -307,6 +307,9 @@
     var r = currentRoute();
     var parts = r.split('/');
     var box = $('#content');
+    // 換頁時關掉上一頁開著的視窗（不然會蓋在新頁面上）
+    Array.prototype.forEach.call(document.querySelectorAll('.modal-wrap'), function (w) { w.remove(); });
+    document.body.classList.remove('noscroll');
     markNav();
     window.scrollTo(0, 0);
     if (r === 'home') return renderHome(box);

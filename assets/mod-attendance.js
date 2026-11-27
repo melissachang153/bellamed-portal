@@ -504,7 +504,7 @@
     var y = S.calYm.slice(0, 4);
     var k = key('cal_' + y);
     var draw = function (c) {
-      if (!alive() || S.tab !== 'calendar') return;
+      if (!alive() || S.tab !== 'settings' || S.setSeg !== 'cal' || !body.isConnected) return;
       var days = ATT.monthDays(S.calYm), first = ATT.weekday(days[0]);
       var cells = [];
       for (var i = 0; i < first; i++) cells.push('<div class="cal-d empty"></div>');
